@@ -167,8 +167,24 @@ The first run downloads Gradle and, if your installed JDK is not 25, a JDK 25 to
 database container keeps running after the API stops; `docker compose -f api/compose.yaml
 down` stops it, and adding `-v` also wipes its data.
 
-Run the tests with `./gradlew test`. They start their own throwaway PostGIS container through
-Testcontainers, so Docker must be running.
+Run the PostGIS spatial repository integration tests explicitly from the `api` directory:
+
+```powershell
+.\gradlew.bat test --tests edu.stevens.quack.location.SpatialRepositoryIT
+```
+
+The class contains two cases: one verifies nearby campus locations are within range, and
+the other verifies a distant location is outside the requested range. Testcontainers starts
+a throwaway PostGIS container for these tests, so Docker must be running.
+
+On macOS or Linux, use:
+
+```bash
+./gradlew test --tests edu.stevens.quack.location.SpatialRepositoryIT
+```
+
+Run the regular API test suite with `.\gradlew.bat test` on Windows or `./gradlew test` on
+macOS or Linux.
 
 ### Repository layout
 
