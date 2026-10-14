@@ -32,9 +32,9 @@ Decided. Do not swap, add, or remove any of these without asking.
 | Client      | React Native, TypeScript, native Mapbox module (`@rnmapbox/maps`)   |
 | API         | Java 25, Spring Boot 4, Spring Web                                  |
 | Persistence | Spring Data JPA, Flyway, hibernate-spatial (JTS types)              |
-| Database    | PostgreSQL with PostGIS, hosted on Railway or Supabase              |
+| Database    | PostgreSQL with PostGIS, hosted on Railway                          |
 | Auth        | `spring-boot-starter-oauth2-client` against Google, domain allowlist |
-| API hosting | Render web service                                                  |
+| API hosting | Railway service, same project as the database                       |
 | CI          | GitHub Actions                                                      |
 | Tests       | JUnit 5, Spring Boot test slices, Testcontainers with PostGIS       |
  
