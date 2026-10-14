@@ -121,6 +121,46 @@ class AuthHttpIT extends PostgresIntegrationTest {
     }
 
     @Test
+    void handoffExchangeRotatesAnExistingSessionId() {
+        var user = authService.signIn(new GoogleIdentity("sub-1", "ada@stevens.edu", true, "Ada", null));
+        SessionBody first = exchange(handoffCodes.issue(user.getId()), null);
+        SessionBody second = exchange(handoffCodes.issue(user.getId()), first.sessionId());
+
+        assertThat(second.sessionId()).isNotEqualTo(first.sessionId());
+
+        RestTestClient caller = RestTestClient.bindToServer()
+                .baseUrl("http://127.0.0.1:" + port)
+                .build();
+        caller.get().uri("/api/v1/me")
+                .header(HttpHeaders.COOKIE, "JSESSIONID=" + first.sessionId())
+                .exchange()
+                .expectStatus().isUnauthorized();
+        caller.get().uri("/api/v1/me")
+                .header(HttpHeaders.COOKIE, "JSESSIONID=" + second.sessionId())
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.email").isEqualTo("ada@stevens.edu");
+    }
+
+    private SessionBody exchange(String handoff, String sessionId) {
+        var request = client.post().uri("/api/v1/auth/session")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(java.util.Map.of("handoff", handoff));
+        if (sessionId != null) {
+            request = request.header(HttpHeaders.COOKIE, "JSESSIONID=" + sessionId);
+        }
+        SessionBody created = request.exchange()
+                .expectStatus().isOk()
+                .expectBody(SessionBody.class)
+                .returnResult()
+                .getResponseBody();
+        assertThat(created).isNotNull();
+        assertThat(created.sessionId()).isNotBlank();
+        return created;
+    }
+
+    @Test
     void handoffCannotBeReused() {
         var user = authService.signIn(new GoogleIdentity("sub-1", "ada@stevens.edu", true, "Ada", null));
         String handoff = handoffCodes.issue(user.getId());

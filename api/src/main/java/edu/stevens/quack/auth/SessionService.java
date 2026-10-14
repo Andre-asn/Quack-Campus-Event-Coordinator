@@ -22,6 +22,7 @@ public class SessionService {
     private final SecurityContextRepository securityContexts = new HttpSessionSecurityContextRepository();
 
     public String start(HttpServletRequest request, HttpServletResponse response, User user) {
+        boolean hadSession = request.getSession(false) != null;
         QuackPrincipal principal = new QuackPrincipal(
                 user.getId(), user.getEmail(), user.getDisplayName(), user.getAvatarUrl());
         PreAuthenticatedAuthenticationToken authentication = new PreAuthenticatedAuthenticationToken(
@@ -30,6 +31,9 @@ public class SessionService {
         context.setAuthentication(authentication);
         SecurityContextHolder.setContext(context);
         securityContexts.saveContext(context, request, response);
+        if (hadSession) {
+            request.changeSessionId();
+        }
         HttpSession session = request.getSession(false);
         if (session == null) {
             throw new IllegalStateException("Session was not created");
