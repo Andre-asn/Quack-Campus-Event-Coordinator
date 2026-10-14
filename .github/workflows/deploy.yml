@@ -1,0 +1,40 @@
+name: Deploy API
+
+# Runs after "Build and test" finishes on main, so a failing build never deploys.
+on:
+  workflow_run:
+    workflows: [Build and test]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Queue deploys rather than cancelling one halfway through.
+concurrency:
+  group: deploy-api
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy API to Railway
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the tested commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Railway CLI
+        run: npm install --global @railway/cli@5.62.1
+
+      - name: Deploy
+        run: railway up api --path-as-root --service quack-api --ci
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
