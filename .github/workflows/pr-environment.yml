@@ -1,0 +1,132 @@
+name: PR environment
+
+# Deploys each pull request to its own temporary Railway environment, copied from production
+# with its own empty database, and fails unless the API deploys and reports healthy. This
+# proves a change will deploy before it merges; production still deploys after merge through
+# deploy.yml. The environment is deleted when the pull request closes or merges.
+#
+# Needs, in the repository settings:
+#   secret   RAILWAY_API_TOKEN         Railway account token (not a project token)
+#   variable RAILWAY_PROJECT_ID        Railway project ID
+#   variable RAILWAY_BASE_ENVIRONMENT  environment to copy, e.g. production
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+permissions:
+  contents: read
+
+# One run per pull request at a time. Teardown waits for an in-flight deploy instead of
+# deleting the environment underneath it.
+concurrency:
+  group: pr-environment-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+env:
+  RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+  PROJECT_ID: ${{ vars.RAILWAY_PROJECT_ID }}
+  BASE_ENVIRONMENT: ${{ vars.RAILWAY_BASE_ENVIRONMENT }}
+  PR_ENVIRONMENT: pr-${{ github.event.pull_request.number }}
+  SERVICE: quack-api
+  RAILWAY_CLI_VERSION: 5.68.0
+
+jobs:
+  deploy:
+    name: Deploy PR environment
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check configuration
+        run: |
+          missing=""
+          [ -n "$RAILWAY_API_TOKEN" ] || missing="$missing secret:RAILWAY_API_TOKEN"
+          [ -n "$PROJECT_ID" ] || missing="$missing variable:RAILWAY_PROJECT_ID"
+          [ -n "$BASE_ENVIRONMENT" ] || missing="$missing variable:RAILWAY_BASE_ENVIRONMENT"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository settings:$missing"
+            exit 1
+          fi
+
+      - name: Check out the pull request
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Railway CLI
+        run: npm install --global "@railway/cli@$RAILWAY_CLI_VERSION"
+
+      - name: Create the environment if it does not exist
+        run: |
+          if railway link --project "$PROJECT_ID" --environment "$PR_ENVIRONMENT" > /dev/null 2>&1; then
+            echo "$PR_ENVIRONMENT already exists"
+          else
+            railway link --project "$PROJECT_ID" --environment "$BASE_ENVIRONMENT"
+            railway environment new "$PR_ENVIRONMENT" --duplicate "$BASE_ENVIRONMENT"
+          fi
+
+      - name: Build and upload
+        run: railway up api --path-as-root --service "$SERVICE" --environment "$PR_ENVIRONMENT" --ci
+
+      # `railway up --ci` returns when the build finishes, not when the app is running, so
+      # wait for the deployment itself to succeed or fail.
+      - name: Wait for the deployment
+        run: |
+          for attempt in $(seq 1 60); do
+            status=$(railway deployment list --service "$SERVICE" --environment "$PR_ENVIRONMENT" --limit 1 --json | jq -r '.[0].status')
+            echo "deployment status: $status"
+            case "$status" in
+              SUCCESS) exit 0 ;;
+              FAILED|CRASHED|REMOVED)
+                echo "::error::Deployment to $PR_ENVIRONMENT ended as $status. Check its logs in Railway."
+                exit 1 ;;
+            esac
+            sleep 10
+          done
+          echo "::error::Deployment to $PR_ENVIRONMENT did not finish within 10 minutes."
+          exit 1
+
+      - name: Check the health endpoint
+        run: |
+          domain=$(railway variables --service "$SERVICE" --environment "$PR_ENVIRONMENT" --json | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty')
+          if [ -z "$domain" ]; then
+            echo "::error::$PR_ENVIRONMENT has no public domain. Give the production service a Railway-provided domain so copies get one too."
+            exit 1
+          fi
+          url="https://$domain/api/v1/health"
+          echo "Checking $url"
+          for attempt in $(seq 1 30); do
+            body=$(curl -fsS --max-time 10 "$url" || true)
+            if [ "$(echo "$body" | jq -r '.database // empty' 2>/dev/null)" = "up" ]; then
+              echo "Healthy: $body"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::$url never reported the database as up. Last response: $body"
+          exit 1
+
+  teardown:
+    name: Delete PR environment
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Railway CLI
+        run: npm install --global "@railway/cli@$RAILWAY_CLI_VERSION"
+
+      - name: Delete the environment
+        run: |
+          if railway link --project "$PROJECT_ID" --environment "$PR_ENVIRONMENT" > /dev/null 2>&1; then
+            railway environment delete "$PR_ENVIRONMENT" --yes
+          else
+            echo "$PR_ENVIRONMENT does not exist, nothing to delete"
+          fi
