@@ -136,15 +136,26 @@ npm start
 ```
 
 Install **Expo Go** on your phone, then scan the QR code the bundler prints. On Android use
-Expo Go's scanner; on iOS use the Camera app. You should see a plain "Quack!" screen, which
-confirms the toolchain works.
+Expo Go's scanner; on iOS use the Camera app. You should see the Quack! sign-in screen.
 
 On a physical iOS device, Expo Go requires both it and the Expo CLI to be signed in to the
 same Expo account. Android has no such requirement. If the phone cannot find the bundler at
 all, the network is blocking it; use `npx expo start --tunnel` instead.
 
+The Android emulator is the sign-in target for local checks. With the emulator running:
+
+```powershell
+& "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" reverse tcp:8080 tcp:8080
+cd client
+npm start
+```
+
+Press `a` in that window. Expo Go opens on the emulator. Run `adb reverse` again after every
+emulator restart. Copy `client/.env.example` to `client/.env` first; the example points the
+app at `http://localhost:8080`. Restart the bundler after changing that file.
+
 The map, the Mapbox native module, and the development build that module requires all arrive
-with story #19 in Sprint 2. Until then there is nothing to configure and no client tokens to set.
+with story #19 in Sprint 2. Google sign-in is configured below. There is no Mapbox token yet.
 
 ### Run the API
 
@@ -184,19 +195,76 @@ On macOS or Linux, use:
 ```
 
 Run the regular API test suite with `.\gradlew.bat test` on Windows or `./gradlew test` on
-macOS or Linux.
+macOS or Linux. `./gradlew build` is the full API build, including those integration tests.
+Docker must be running. On Windows, if `java -version` is older than 25, set `JAVA_HOME` to
+a JDK 25 before Gradle, such as the JetBrains runtime bundled with IntelliJ IDEA.
+
+Flyway runs `V1__enable_postgis.sql` and then `V2__create_users.sql`. A local database
+created while the users migration was still `V1` must be recreated:
+
+```bash
+docker compose -f api/compose.yaml down -v
+```
+
+### Google sign-in
+
+Sign-in is a Google OAuth web client. The API checks the verified email domain. The
+allowlist is `quack.auth.allowed-email-domains` in `api/src/main/resources/application.yml`
+(default `stevens.edu`). Do not enforce the domain in the client.
+
+1. In Google Cloud, create an OAuth client of type **Web application** in the same project
+   as the OAuth consent screen.
+2. On the consent screen, set the app name and a support email. While the app is in
+   testing, add every account you will use under **Test users**.
+3. Under **Authorized redirect URIs**, add this value with no trailing slash:
+
+   ```text
+   http://localhost:8080/api/v1/auth/callback
+   ```
+
+4. Copy `api/.env.example` to `api/.env` and set `GOOGLE_CLIENT_ID` and
+   `GOOGLE_CLIENT_SECRET`. Leave that file uncommitted.
+
+`bootRun` reads those values from the process environment. From `api` on PowerShell:
+
+```powershell
+Get-Content .env | ForEach-Object { if ($_ -match '^\s*([^#=]+)=(.*)$') { Set-Item -Path "env:$($matches[1].Trim())" -Value $matches[2].Trim() } }
+.\gradlew.bat bootRun
+```
+
+On macOS or Linux: `set -a && source .env && set +a && ./gradlew bootRun`.
+
+Google accepts `http://localhost` as a redirect host. It rejects a private IP such as
+`10.0.2.2` or `192.168.x.x`, and it rejects a tunnel hostname you do not own. The emulator
+reaches the API through `adb reverse`, so the client base URL stays `http://localhost:8080`.
+
+### Device verification
+
+Recorded for stories #24, #25, and #26 on the Android emulator, with
+`adb reverse tcp:8080 tcp:8080` and `EXPO_PUBLIC_API_BASE_URL=http://localhost:8080`.
+The API integration tests cover the same rules against PostGIS. This table is the device
+record: what was checked, and the result that counts as a pass.
+
+| Check | Action | Recorded result |
+|---|---|---|
+| Sign-in | Tap **Sign in with Stevens Google** and finish Google with an `@stevens.edu` test user. | The screen shows **Signed in as** the account name and the Stevens email. |
+| Domain rejection | Sign in with a verified Google account outside `stevens.edu`. | The screen stays signed out and shows **Use a Stevens Google account to sign in.** |
+| Session restoration | Force-close Expo Go, then open Quack! again. | The signed-in screen returns without another Google prompt. |
+| Logout | Tap **Sign out**. | The screen returns to **Sign in with Stevens Google**. |
 
 ### Repository layout
 
 ```
 api/                     Spring Boot API (Java 25, Spring Boot 4, Gradle wrapper)
+  .env.example           Google client id and secret placeholders
   compose.yaml           Local PostgreSQL + PostGIS for development
   src/main/resources/
     application.yml      Configuration; deployed values come from environment variables
     db/migration/        Flyway migrations
 client/                  React Native client (Expo SDK 57, TypeScript)
   app.json               Expo config
-  App.tsx                Placeholder screen; the map lands with #19
+  App.tsx                Sign-in screen; the map lands with #19
+  .env.example           API base URL for local sign-in
 ```
 
 ## Contributing
