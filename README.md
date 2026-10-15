@@ -132,10 +132,13 @@ cd Quack-Campus-Event-Coordinator
 The client uses the native Mapbox module, so it runs from an Android **development build**,
 not Expo Go. Android is the only platform this semester.
 
-**1. Mapbox token (once per developer).** In your Mapbox account, create a public token:
+**1. Mapbox token (once per developer).** In your Mapbox account, create a new public token
+named for Quack! (not the default public token):
 
-- Scopes: `styles:read`, `fonts:read`, `tiles:read`. Nothing else.
-- URL/app restriction: the Android package `edu.stevens.quack`.
+- Scopes: `styles:read`, `styles:tiles`, `fonts:read`. Uncheck every other scope.
+- Leave URL restrictions empty. Mapbox's URL restrictions do not apply to requests from
+  mobile apps, and Mapbox has no package-name restriction, so the protection is the narrow
+  scopes plus a token used only by this app. Rotate it at Mapbox if it leaks.
 
 Copy `client/.env.example` to `client/.env` and set `EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN` to that
 `pk.` token. `.env` is git-ignored. Do not commit it. The app rejects anything that is not a
