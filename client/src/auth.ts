@@ -32,7 +32,13 @@ export async function restoreSession(): Promise<StoredSession | null> {
 export async function signInWithGoogle(): Promise<SignInResult> {
   const redirect = Linking.createURL('auth');
   const start = `${apiBaseUrl}/api/v1/auth/login?appRedirect=${encodeURIComponent(redirect)}`;
-  const result = await WebBrowser.openAuthSessionAsync(start, redirect);
+  const result = await WebBrowser.openAuthSessionAsync(start, redirect, {
+    // A separate browser task lets Expo Go receive the exp:// return link.
+    // The proxy activity closes the app when that return happens immediately.
+    createTask: true,
+    useProxyActivity: false,
+    preferEphemeralSession: true,
+  });
   if (result.type !== 'success' || !result.url) {
     return { type: 'cancel' };
   }
@@ -66,6 +72,11 @@ export async function signOut(sessionId: string): Promise<'signed-out' | 'failed
     });
     if (response.status === 204 || response.status === 401) {
       await clearSession();
+      try {
+        await WebBrowser.coolDownAsync();
+      } catch {
+        // The session is already cleared. Closing the browser tab is best-effort.
+      }
       return 'signed-out';
     }
     return 'failed';

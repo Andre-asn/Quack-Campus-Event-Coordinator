@@ -65,6 +65,7 @@ class AuthHttpIT extends PostgresIntegrationTest {
                     assertThat(location).contains("accounts.google.com");
                     assertThat(location).contains("redirect_uri=");
                     assertThat(location).contains("/api/v1/auth/callback");
+                    assertThat(location).contains("prompt=select_account");
                 });
     }
 
