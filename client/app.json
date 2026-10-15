@@ -2,6 +2,7 @@
   "expo": {
     "name": "Quack!",
     "slug": "quack",
+    "owner": "quack-stevens-app",
     "version": "0.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -20,10 +21,18 @@
     },
     "ios": {
       "bundleIdentifier": "com.quackcampus.app",
-      "supportsTablet": false
+      "supportsTablet": false,
+      "config": {
+        "usesNonExemptEncryption": false
+      }
     },
     "plugins": [
       "expo-font"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "e7e266f5-1d8c-45bd-a166-39195637d742"
+      }
+    }
   }
 }

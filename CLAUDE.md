@@ -2,7 +2,7 @@
  
 Campus meetup app for Stevens students. A student pins an event on the campus map with a
 time and one line of detail ("Studying for CS102!"); nearby students see it and join.
-Semester project: 14 weeks, 4 people, one campus (Stevens), one client platform.
+Semester project: 14 weeks, 4 people, one campus (Stevens), one client app on Android and iOS.
  
 Problem statement, scope, and timeline live in `docs/overview.md`. The Quack! Technical
 Design doc is the source of truth for architecture, data model, and API. GitHub issues are
@@ -214,9 +214,9 @@ Use these exact terms in code, UI copy, and commit messages:
   approving review.
 ## Do not guess on these
  
-Decided: Android is the platform we build, test, and demo on this semester. An iOS profile
-can be added later; iOS would need an Apple Developer membership and a physical device,
-since nobody on the team has a Mac.
+Decided: we build, test, and demo on Android and iOS. Nobody on the team has a Mac, so iOS
+builds and signing run on EAS, and iOS testing happens on physical devices through
+TestFlight against the production API. The app id is `com.quackcampus.app` on both.
  
 Still open. Ask the team rather than picking an answer:
  
