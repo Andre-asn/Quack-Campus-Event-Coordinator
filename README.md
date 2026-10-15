@@ -238,6 +238,45 @@ Google accepts `http://localhost` as a redirect host. It rejects a private IP su
 `10.0.2.2` or `192.168.x.x`, and it rejects a tunnel hostname you do not own. The emulator
 reaches the API through `adb reverse`, so the client base URL stays `http://localhost:8080`.
 
+The production API needs the same Google client. In Railway, set `GOOGLE_CLIENT_ID` and
+`GOOGLE_CLIENT_SECRET` on the production service, and add this redirect URI to the OAuth
+client:
+
+```text
+https://quack-api-production.up.railway.app/api/v1/auth/callback
+```
+
+### iOS on TestFlight
+
+Pull requests deploy to production, and TestFlight builds talk to production
+(`https://quack-api-production.up.railway.app`, set in `client/eas.json`). No Mac is needed;
+EAS builds and signs in the cloud. The EAS project is `@quack-stevens-app/quack`, and the
+bundle identifier is `com.quackcampus.app`.
+
+You need an Expo account that is a member of `quack-stevens-app`, and access to the Apple
+Developer Program team. From `client`, the first time:
+
+```bash
+npx eas-cli login
+npx eas-cli build --profile production --platform ios
+```
+
+EAS asks you to sign in to Apple, registers the bundle identifier, and creates the
+distribution certificate and provisioning profile. Let it manage them. When the build
+finishes, upload it:
+
+```bash
+npx eas-cli submit --platform ios --latest
+```
+
+The first submit creates the app in App Store Connect. The store name must be unique across
+the App Store, so pick another if **Quack!** is taken; the name on the home screen stays
+**Quack!**. After Apple finishes processing, open App Store Connect → the app → **TestFlight**,
+add teammates to an internal testing group, and they install the build from the TestFlight
+app. Internal testers need no review. External testers need Beta App Review first.
+
+Later builds are the same two commands. EAS increments the build number.
+
 ### Device verification
 
 Recorded for stories #24, #25, and #26 on the Android emulator, with
@@ -262,7 +301,8 @@ api/                     Spring Boot API (Java 25, Spring Boot 4, Gradle wrapper
     application.yml      Configuration; deployed values come from environment variables
     db/migration/        Flyway migrations
 client/                  React Native client (Expo SDK 57, TypeScript)
-  app.json               Expo config
+  app.json               Expo config, including the EAS project id
+  eas.json               EAS production profile for TestFlight builds
   App.tsx                Sign-in screen; the map lands with #19
   .env.example           API base URL for local sign-in
 ```
