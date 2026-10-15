@@ -45,7 +45,7 @@ public class AuthService {
         }
         String domain = email.substring(at + 1);
         if (!properties.getAllowedEmailDomains().contains(domain)) {
-            throw new SignInRejectedException(SignInFailure.DOMAIN_NOT_ALLOWED);
+            throw new SignInRejectedException(SignInFailure.DOMAIN_NOT_ALLOWED, email);
         }
 
         String displayName = displayName(identity.displayName(), email, at);
