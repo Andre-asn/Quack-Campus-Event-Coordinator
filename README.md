@@ -110,172 +110,113 @@ Full breakdown lives on the [Epics/Features/Stories wiki page](../../wiki/epics-
 
 ## Getting Started
 
-### Prerequisites
+### 1. Prerequisites
 
 | Tool | Version | Needed for |
 |---|---|---|
-| **Node** | 22 LTS or newer | The React Native client |
-| **JDK** | 25 | The Spring Boot API |
-| **Docker** | any current | The local PostgreSQL + PostGIS database |
+| **Node** | 22 LTS or newer | The app |
+| **JDK** | 25 | The API (backend work only) |
+| **Docker** | any current | The local database (backend work only) |
 
-Nothing else is installed globally. Only Node is needed to work on the client.
+For TestFlight builds you also need an Expo account in the `quack-stevens-app` organization
+and access to the Apple Developer team. Ask Andre for both.
 
-### Clone
-
-```bash
-git clone https://github.com/MikeZHONGznt/Quack-Campus-Event-Coordinator.git
-cd Quack-Campus-Event-Coordinator
-```
-
-### Run the client
+### 2. Clone and install
 
 ```bash
-cd client
+git clone https://github.com/Andre-asn/Quack-Campus-Event-Coordinator.git
+cd Quack-Campus-Event-Coordinator/client
 npm install
-npm start
+cp .env.example .env
 ```
 
-Install **Expo Go** on your phone, then scan the QR code the bundler prints. On Android use
-Expo Go's scanner; on iOS use the Camera app. You should see the Quack! sign-in screen.
+### 3. Run the app on your phone (iPhone or Android)
 
-On a physical iOS device, Expo Go requires both it and the Expo CLI to be signed in to the
-same Expo account. Android has no such requirement. If the phone cannot find the bundler at
-all, the network is blocking it; use `npx expo start --tunnel` instead.
-
-The Android emulator is the sign-in target for local checks. With the emulator running:
-
-```powershell
-& "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" reverse tcp:8080 tcp:8080
-cd client
-npm start
-```
-
-Press `a` in that window. Expo Go opens on the emulator. Run `adb reverse` again after every
-emulator restart. Copy `client/.env.example` to `client/.env` first; the example points the
-app at `http://localhost:8080`. Restart the bundler after changing that file.
-
-The map, the Mapbox native module, and the development build that module requires all arrive
-with story #19 in Sprint 2. Google sign-in is configured below. There is no Mapbox token yet.
-
-### Run the API
-
-Start Docker, then:
-
-```bash
-cd api
-./gradlew bootRun        # Windows: .\gradlew.bat bootRun
-```
-
-That one command starts a local PostgreSQL + PostGIS container from `api/compose.yaml`,
-runs Flyway migrations, and serves the API on port 8080. Check it with:
-
-```bash
-curl http://localhost:8080/api/v1/health
-# {"status":"up","database":"up"}
-```
-
-The first run downloads Gradle and, if your installed JDK is not 25, a JDK 25 toolchain. The
-database container keeps running after the API stops; `docker compose -f api/compose.yaml
-down` stops it, and adding `-v` also wipes its data.
-
-Run the PostGIS spatial repository integration tests explicitly from the `api` directory:
-
-```powershell
-.\gradlew.bat test --tests edu.stevens.quack.location.SpatialRepositoryIT
-```
-
-The class contains two cases: one verifies nearby campus locations are within range, and
-the other verifies a distant location is outside the requested range. Testcontainers starts
-a throwaway PostGIS container for these tests, so Docker must be running.
-
-On macOS or Linux, use:
-
-```bash
-./gradlew test --tests edu.stevens.quack.location.SpatialRepositoryIT
-```
-
-Run the regular API test suite with `.\gradlew.bat test` on Windows or `./gradlew test` on
-macOS or Linux. `./gradlew build` is the full API build, including those integration tests.
-Docker must be running. On Windows, if `java -version` is older than 25, set `JAVA_HOME` to
-a JDK 25 before Gradle, such as the JetBrains runtime bundled with IntelliJ IDEA.
-
-Flyway runs `V1__enable_postgis.sql` and then `V2__create_users.sql`. A local database
-created while the users migration was still `V1` must be recreated:
-
-```bash
-docker compose -f api/compose.yaml down -v
-```
-
-### Google sign-in
-
-Sign-in is a Google OAuth web client. The API checks the verified email domain. The
-allowlist is `quack.auth.allowed-email-domains` in `api/src/main/resources/application.yml`
-(default `stevens.edu`). Do not enforce the domain in the client.
-
-1. In Google Cloud, create an OAuth client of type **Web application** in the same project
-   as the OAuth consent screen.
-2. On the consent screen, set the app name and a support email. While the app is in
-   testing, add every account you will use under **Test users**.
-3. Under **Authorized redirect URIs**, add this value with no trailing slash:
+1. Install **Expo Go** from the App Store or Play Store.
+2. Point the app at the production API. In `client/.env`:
 
    ```text
-   http://localhost:8080/api/v1/auth/callback
+   EXPO_PUBLIC_API_BASE_URL=https://quack-api-production.up.railway.app
    ```
 
-4. Copy `api/.env.example` to `api/.env` and set `GOOGLE_CLIENT_ID` and
-   `GOOGLE_CLIENT_SECRET`. Leave that file uncommitted.
+3. Start the bundler from `client`:
 
-`bootRun` reads those values from the process environment. From `api` on PowerShell:
+   ```bash
+   npm start
+   ```
 
-```powershell
-Get-Content .env | ForEach-Object { if ($_ -match '^\s*([^#=]+)=(.*)$') { Set-Item -Path "env:$($matches[1].Trim())" -Value $matches[2].Trim() } }
-.\gradlew.bat bootRun
-```
+4. Scan the QR code. **Android:** use Expo Go's scanner. **iPhone:** use the Camera app, and
+   sign in to the same Expo account in Expo Go and on your computer (`npx expo login`).
+   Phone and computer must be on the same Wi-Fi; if the phone can't connect, run
+   `npx expo start --tunnel` instead.
+5. Sign in with your `@stevens.edu` Google account. It must be on the Google consent
+   screen's test-user list; ask Andre to add you.
 
-On macOS or Linux: `set -a && source .env && set +a && ./gradlew bootRun`.
+Restart `npm start` after changing `.env`.
 
-Google accepts `http://localhost` as a redirect host. It rejects a private IP such as
-`10.0.2.2` or `192.168.x.x`, and it rejects a tunnel hostname you do not own. The emulator
-reaches the API through `adb reverse`, so the client base URL stays `http://localhost:8080`.
+### 4. Run the API locally (backend work only)
 
-The production API needs the same Google client. In Railway, set `GOOGLE_CLIENT_ID` and
-`GOOGLE_CLIENT_SECRET` on the production service, and add this redirect URI to the OAuth
-client:
+1. Get the Google client id and secret from Andre, then `cp api/.env.example api/.env` and
+   fill in `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
+2. Start Docker, then from `api`:
 
-```text
-https://quack-api-production.up.railway.app/api/v1/auth/callback
-```
+   ```bash
+   set -a && source .env && set +a && ./gradlew bootRun
+   ```
 
-### iOS on TestFlight
+   On Windows PowerShell:
 
-Pull requests deploy to production, and TestFlight builds talk to production
-(`https://quack-api-production.up.railway.app`, set in `client/eas.json`). No Mac is needed;
-EAS builds and signs in the cloud. The EAS project is `@quack-stevens-app/quack`, and the
-bundle identifier is `com.quackcampus.app`.
+   ```powershell
+   Get-Content .env | ForEach-Object { if ($_ -match '^\s*([^#=]+)=(.*)$') { Set-Item -Path "env:$($matches[1].Trim())" -Value $matches[2].Trim() } }
+   .\gradlew.bat bootRun
+   ```
 
-You need an Expo account that is a member of `quack-stevens-app`, and access to the Apple
-Developer Program team. From `client`, the first time:
+   This starts PostgreSQL + PostGIS from `api/compose.yaml`, runs the Flyway migrations, and
+   serves the API on port 8080. Check it: `curl http://localhost:8080/api/v1/health`.
+3. To sign in against it, use the **Android emulator** (Google rejects `localhost` callbacks
+   from a real phone). Set `EXPO_PUBLIC_API_BASE_URL=http://localhost:8080` in `client/.env`,
+   then:
 
-```bash
-npx eas-cli login
-npx eas-cli build --profile production --platform ios
-```
+   ```powershell
+   & "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" reverse tcp:8080 tcp:8080
+   npm start
+   ```
 
-EAS asks you to sign in to Apple, registers the bundle identifier, and creates the
-distribution certificate and provisioning profile. Let it manage them. When the build
-finishes, upload it:
+   Press `a` to open the app on the emulator. Repeat `adb reverse` after each emulator restart.
+4. Run the tests with `./gradlew test` (`.\gradlew.bat test` on Windows). Docker must be
+   running; Testcontainers starts a throwaway PostGIS database.
 
-```bash
-npx eas-cli submit --platform ios --latest
-```
+If `java -version` is older than 25, point `JAVA_HOME` at a JDK 25 first. The database keeps
+running after the API stops; `docker compose -f api/compose.yaml down -v` stops and wipes it.
 
-The first submit creates the app in App Store Connect. The store name must be unique across
-the App Store, so pick another if **Quack!** is taken; the name on the home screen stays
-**Quack!**. After Apple finishes processing, open App Store Connect → the app → **TestFlight**,
-add teammates to an internal testing group, and they install the build from the TestFlight
-app. Internal testers need no review. External testers need Beta App Review first.
+### 5. Ship to TestFlight (iPhone)
 
-Later builds are the same two commands. EAS increments the build number.
+TestFlight builds run against the production API. EAS builds and signs them in the cloud,
+so no Mac is needed. From `client`:
+
+1. Log in: `npx eas-cli login`.
+2. Build: `npx eas-cli build --profile production --platform ios`. The first time, sign in to
+   Apple when asked and let EAS create the certificate and provisioning profile.
+3. Upload: `npx eas-cli submit --platform ios --latest`. If asked for an App Store Connect API
+   key, let EAS generate one with the **App Manager** role.
+4. When Apple finishes processing (about 10–30 minutes), open App Store Connect → **Quack!** →
+   **TestFlight** → **Internal Testing**, add the build, and add testers. Testers must first
+   accept an invite under **Users and Access**.
+5. Testers install **TestFlight** on their iPhone and install Quack! from it.
+
+Each later release is steps 2 and 3 again; EAS bumps the build number.
+
+### One-time setup (maintainers)
+
+- **Google sign-in** is one OAuth client of type **Web application**. Its authorized
+  redirect URIs are `http://localhost:8080/api/v1/auth/callback` and
+  `https://quack-api-production.up.railway.app/api/v1/auth/callback`, with no trailing slash.
+  Test users are listed on the OAuth consent screen.
+- **Railway** production sets `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
+- The allowed email domains are `quack.auth.allowed-email-domains` in
+  `api/src/main/resources/application.yml` (default `stevens.edu`). The client never checks
+  the domain.
+- EAS project: `@quack-stevens-app/quack`. App id on both platforms: `com.quackcampus.app`.
 
 ### Device verification
 
@@ -303,8 +244,8 @@ api/                     Spring Boot API (Java 25, Spring Boot 4, Gradle wrapper
 client/                  React Native client (Expo SDK 57, TypeScript)
   app.json               Expo config, including the EAS project id
   eas.json               EAS production profile for TestFlight builds
-  App.tsx                Sign-in screen; the map lands with #19
-  .env.example           API base URL for local sign-in
+  App.tsx                Loading, sign-in, and signed-in screens
+  .env.example           API base URL for the app
 ```
 
 ## Contributing
