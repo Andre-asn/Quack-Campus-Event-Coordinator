@@ -76,8 +76,9 @@ class AuthServiceIT extends PostgresIntegrationTest {
     void nonStevensAccountIsRejectedAndCreatesNoUser() {
         assertThatThrownBy(() -> authService.signIn(verified("gmail-sub", "ada@gmail.com", "Ada")))
                 .isInstanceOf(SignInRejectedException.class)
-                .extracting(ex -> ((SignInRejectedException) ex).failure())
-                .isEqualTo(SignInFailure.DOMAIN_NOT_ALLOWED);
+                .extracting(ex -> ((SignInRejectedException) ex).failure(),
+                        ex -> ((SignInRejectedException) ex).rejectedEmail())
+                .containsExactly(SignInFailure.DOMAIN_NOT_ALLOWED, "ada@gmail.com");
         assertThat(users.count()).isZero();
     }
 

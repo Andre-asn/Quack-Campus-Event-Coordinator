@@ -79,6 +79,24 @@ class SignInHandlerTest {
         assertThat(response.getRedirectedUrl()).isEqualTo("quack://auth?error=DOMAIN_NOT_ALLOWED");
     }
 
+    @Test
+    void domainRejectionTellsTheAppWhichAccountWasTurnedAway() throws Exception {
+        SignInFailureHandler handler = new SignInFailureHandler(redirects);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.getSession().setAttribute(SignInSuccessHandler.APP_REDIRECT, "quack://auth");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        SignInRejectedException rejected =
+                new SignInRejectedException(SignInFailure.DOMAIN_NOT_ALLOWED, "alex.r+test@gmail.com");
+
+        handler.onAuthenticationFailure(
+                request,
+                response,
+                new OAuth2AuthenticationException(new OAuth2Error("DOMAIN_NOT_ALLOWED"), rejected));
+
+        assertThat(response.getRedirectedUrl())
+                .isEqualTo("quack://auth?error=DOMAIN_NOT_ALLOWED&email=alex.r%2Btest%40gmail.com");
+    }
+
     private static AppRedirectValidator validator() {
         AuthProperties properties = new AuthProperties();
         properties.setAllowedEmailDomains(java.util.List.of("stevens.edu"));
