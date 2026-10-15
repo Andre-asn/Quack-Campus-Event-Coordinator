@@ -17,9 +17,9 @@ through the committed wrapper.
  
 - Run API locally: `cd api && ./gradlew bootRun` (Docker running). Starts PostGIS from
   `api/compose.yaml` and serves `GET /api/v1/health` on port 8080.
-- Run client: `cd client && npm install && npm start`, then scan the QR code with Expo
-  Go. The development build that the Mapbox native module needs arrives with #19
-  in Sprint 2.
+- Run client: `cd client && npm install && npm start`, then open the Quack! Android
+  development build (not Expo Go). Build it with
+  `npx eas-cli build --profile development --platform android`; see the README.
 - Test: `cd api && ./gradlew test` (Docker running, for Testcontainers)
 - Lint:
 - Deploy: merging to `main` deploys the API via GitHub Actions. Never deploy by hand.

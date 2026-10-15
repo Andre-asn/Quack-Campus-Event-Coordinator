@@ -10,7 +10,9 @@
   },
   "dependencies": {
     "@expo-google-fonts/bricolage-grotesque": "^0.4.1",
+    "@rnmapbox/maps": "^10.3.8",
     "expo": "~57.0.26",
+    "expo-dev-client": "~57.0.20",
     "expo-font": "~57.0.4",
     "expo-linking": "~57.0.11",
     "expo-secure-store": "~57.0.4",

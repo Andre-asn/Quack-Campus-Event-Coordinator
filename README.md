@@ -129,18 +129,43 @@ cd Quack-Campus-Event-Coordinator
 
 ### Run the client
 
+The client uses the native Mapbox module, so it runs from an Android **development build**,
+not Expo Go. Android is the only platform this semester.
+
+**1. Mapbox token (once per developer).** In your Mapbox account, create a public token:
+
+- Scopes: `styles:read`, `fonts:read`, `tiles:read`. Nothing else.
+- URL/app restriction: the Android package `edu.stevens.quack`.
+
+Copy `client/.env.example` to `client/.env` and set `EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN` to that
+`pk.` token. `.env` is git-ignored. Do not commit it. The app rejects anything that is not a
+`pk.` token and shows **Map unavailable** instead of the map. No secret `sk.` download token
+is needed; Mapbox no longer requires one to fetch the SDK.
+
+**2. Build the development build (once, and again whenever native dependencies change).**
+Builds run on EAS, so no local Android toolchain is needed. Log in to an Expo account:
+
+```bash
+cd client
+npx eas-cli login
+npx eas-cli init          # first time only: links the project and writes its id to app.json
+npx eas-cli build --profile development --platform android
+```
+
+The build needs no secrets. When it finishes, EAS prints a link and a QR code for the APK.
+Open it on the phone, or download the APK and drag it onto a running emulator, to install
+**Quack!**.
+
+**3. Run.** Start the bundler, then open the installed Quack! app:
+
 ```bash
 cd client
 npm install
 npm start
 ```
 
-Install **Expo Go** on your phone, then scan the QR code the bundler prints. On Android use
-Expo Go's scanner; on iOS use the Camera app. You should see the Quack! sign-in screen.
-
-On a physical iOS device, Expo Go requires both it and the Expo CLI to be signed in to the
-same Expo account. Android has no such requirement. If the phone cannot find the bundler at
-all, the network is blocking it; use `npx expo start --tunnel` instead.
+On a phone, scan the bundler's QR code from inside the Quack! app. If the phone cannot reach
+the bundler, use `npx expo start --tunnel`. Sign in, and the map opens centered on Stevens.
 
 The Android emulator is the sign-in target for local checks. With the emulator running:
 
@@ -150,12 +175,9 @@ cd client
 npm start
 ```
 
-Press `a` in that window. Expo Go opens on the emulator. Run `adb reverse` again after every
-emulator restart. Copy `client/.env.example` to `client/.env` first; the example points the
-app at `http://localhost:8080`. Restart the bundler after changing that file.
-
-The map, the Mapbox native module, and the development build that module requires all arrive
-with story #19 in Sprint 2. Google sign-in is configured below. There is no Mapbox token yet.
+Press `a` in that window to open the development build on the emulator. Run `adb reverse`
+again after every emulator restart. Restart the bundler after changing `client/.env`.
+Google sign-in is configured below.
 
 ### Run the API
 
@@ -262,9 +284,11 @@ api/                     Spring Boot API (Java 25, Spring Boot 4, Gradle wrapper
     application.yml      Configuration; deployed values come from environment variables
     db/migration/        Flyway migrations
 client/                  React Native client (Expo SDK 57, TypeScript)
-  app.json               Expo config
-  App.tsx                Sign-in screen; the map lands with #19
-  .env.example           API base URL for local sign-in
+  app.json               Expo config, including the @rnmapbox/maps plugin
+  eas.json               EAS development build profile (Android APK)
+  App.tsx                Sign-in screen, then the campus map
+  src/CampusMap.tsx      Mapbox map centered on Stevens
+  .env.example           API base URL and public Mapbox token placeholders
 ```
 
 ## Contributing

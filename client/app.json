@@ -23,7 +23,8 @@
       "supportsTablet": false
     },
     "plugins": [
-      "expo-font"
+      "expo-font",
+      "@rnmapbox/maps"
     ]
   }
 }
