@@ -143,12 +143,13 @@ Copy `client/.env.example` to `client/.env` and set `EXPO_PUBLIC_MAPBOX_ACCESS_T
 is needed; Mapbox no longer requires one to fetch the SDK.
 
 **2. Build the development build (once, and again whenever native dependencies change).**
-Builds run on EAS, so no local Android toolchain is needed. Log in to an Expo account:
+Builds run on EAS, so no local Android toolchain is needed. The EAS project is
+`@quack-stevens-app/quack`; log in with an Expo account that is a member of
+`quack-stevens-app`:
 
 ```bash
 cd client
 npx eas-cli login
-npx eas-cli init          # first time only: links the project and writes its id to app.json
 npx eas-cli build --profile development --platform android
 ```
 

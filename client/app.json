@@ -2,6 +2,7 @@
   "expo": {
     "name": "Quack!",
     "slug": "quack",
+    "owner": "quack-stevens-app",
     "version": "0.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -25,6 +26,11 @@
     "plugins": [
       "expo-font",
       "@rnmapbox/maps"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "e7e266f5-1d8c-45bd-a166-39195637d742"
+      }
+    }
   }
 }
