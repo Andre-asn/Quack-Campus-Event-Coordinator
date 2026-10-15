@@ -9,7 +9,7 @@
     "scheme": "quack",
     "userInterfaceStyle": "light",
     "android": {
-      "package": "edu.stevens.quack",
+      "package": "com.quackcampus.app",
       "usesCleartextTraffic": true,
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
@@ -20,8 +20,11 @@
       "predictiveBackGestureEnabled": false
     },
     "ios": {
-      "bundleIdentifier": "edu.stevens.quack",
-      "supportsTablet": false
+      "bundleIdentifier": "com.quackcampus.app",
+      "supportsTablet": false,
+      "config": {
+        "usesNonExemptEncryption": false
+      }
     },
     "plugins": [
       "expo-font",

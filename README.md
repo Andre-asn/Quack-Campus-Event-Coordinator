@@ -129,8 +129,8 @@ cd Quack-Campus-Event-Coordinator
 
 ### Run the client
 
-The client uses the native Mapbox module, so it runs from an Android **development build**,
-not Expo Go. Android is the only platform this semester.
+The client uses the native Mapbox module, so it runs from a **development build** on Android
+or iPhone, not Expo Go. Expo Go cannot load the map. TestFlight builds are covered below.
 
 **1. Mapbox token (once per developer).** In your Mapbox account, create a new public token
 named for Quack! (not the default public token):
@@ -159,6 +159,17 @@ npx eas-cli build --profile development --platform android
 The build needs no secrets. When it finishes, EAS prints a link and a QR code for the APK.
 Open it on the phone, or download the APK and drag it onto a running emulator, to install
 **Quack!**.
+
+For an iPhone, register the phone once, then build. EAS signs the build for the registered
+devices, so a new phone needs `device:create` and a fresh build:
+
+```bash
+npx eas-cli device:create
+npx eas-cli build --profile development --platform ios
+```
+
+Open the build link on the iPhone to install it, then turn on **Settings → Privacy & Security
+→ Developer Mode** when iOS asks.
 
 **3. Run.** Start the bundler, then open the installed Quack! app:
 
@@ -264,6 +275,52 @@ Google accepts `http://localhost` as a redirect host. It rejects a private IP su
 `10.0.2.2` or `192.168.x.x`, and it rejects a tunnel hostname you do not own. The emulator
 reaches the API through `adb reverse`, so the client base URL stays `http://localhost:8080`.
 
+The production API needs the same Google client. In Railway, set `GOOGLE_CLIENT_ID` and
+`GOOGLE_CLIENT_SECRET` on the production service, and add this redirect URI to the OAuth
+client:
+
+```text
+https://quack-api-production.up.railway.app/api/v1/auth/callback
+```
+
+### iOS on TestFlight
+
+Pull requests deploy to production, and TestFlight builds talk to production
+(`https://quack-api-production.up.railway.app`, set in `client/eas.json`). No Mac is needed;
+EAS builds and signs in the cloud. The EAS project is `@quack-stevens-app/quack`, and the
+bundle identifier is `com.quackcampus.app`.
+
+You need an Expo account that is a member of `quack-stevens-app`, and access to the Apple
+Developer Program team. TestFlight builds bundle the app's code on EAS, where `client/.env`
+does not exist, so store the Mapbox token in EAS once:
+
+```bash
+npx eas-cli env:create --environment production --name EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN --value pk.your-token --visibility sensitive
+```
+
+From `client`, the first time:
+
+```bash
+npx eas-cli login
+npx eas-cli build --profile production --platform ios
+```
+
+EAS asks you to sign in to Apple, registers the bundle identifier, and creates the
+distribution certificate and provisioning profile. Let it manage them. When the build
+finishes, upload it:
+
+```bash
+npx eas-cli submit --platform ios --latest
+```
+
+The first submit creates the app in App Store Connect. The store name must be unique across
+the App Store, so pick another if **Quack!** is taken; the name on the home screen stays
+**Quack!**. After Apple finishes processing, open App Store Connect → the app → **TestFlight**,
+add teammates to an internal testing group, and they install the build from the TestFlight
+app. Internal testers need no review. External testers need Beta App Review first.
+
+Later builds are the same two commands. EAS increments the build number.
+
 ### Device verification
 
 Recorded for stories #24, #25, and #26 on the Android emulator, with
@@ -288,8 +345,8 @@ api/                     Spring Boot API (Java 25, Spring Boot 4, Gradle wrapper
     application.yml      Configuration; deployed values come from environment variables
     db/migration/        Flyway migrations
 client/                  React Native client (Expo SDK 57, TypeScript)
-  app.json               Expo config, including the @rnmapbox/maps plugin
-  eas.json               EAS development build profile (Android APK)
+  app.json               Expo config: EAS project id and the @rnmapbox/maps plugin
+  eas.json               EAS profiles: development build and production (TestFlight)
   App.tsx                Sign-in screen, then the campus map
   src/CampusMap.tsx      Mapbox map centered on Stevens
   .env.example           API base URL and public Mapbox token placeholders
