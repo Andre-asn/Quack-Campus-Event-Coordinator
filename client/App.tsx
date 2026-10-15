@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Pressable, StatusBar as NativeStatusBar, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   BricolageGrotesque_600SemiBold,
   BricolageGrotesque_700Bold,
@@ -19,6 +20,15 @@ type Screen =
   | { status: 'signed-in'; session: StoredSession; message: string | null; busy: boolean };
 
 export default function App() {
+  return (
+    <SafeAreaProvider>
+      <QuackApp />
+    </SafeAreaProvider>
+  );
+}
+
+function QuackApp() {
+  const insets = useSafeAreaInsets();
   const [screen, setScreen] = useState<Screen>({ status: 'loading' });
   const [fontsLoaded, fontError] = useFonts({
     BricolageGrotesque_600SemiBold,
@@ -92,7 +102,8 @@ export default function App() {
   return (
     <View style={styles.home}>
       <CampusMap />
-      <View pointerEvents="box-none" style={styles.overlay}>
+      {/* Clears the status bar, notch, or Dynamic Island while the map stays full-screen. */}
+      <View pointerEvents="box-none" style={[styles.overlay, { paddingTop: insets.top + 12 }]}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`Sign out ${screen.session.user.email}`}
@@ -117,8 +128,6 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     gap: 6,
     paddingHorizontal: 16,
-    // Android draws edge to edge, so clear the status bar.
-    paddingTop: (NativeStatusBar.currentHeight ?? 0) + 12,
   },
   chip: {
     backgroundColor: '#fff',
