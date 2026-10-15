@@ -93,8 +93,9 @@ support, multi-campus tenancy, direct Stevens Okta integration, geocoding.
  
 ## Rules
  
-- Every change traces to a `[Story]` issue. If a request implies work no story covers,
-  say so before writing code.
+- Product work traces to a `[Story]` issue. If a request implies product work no story
+  covers, say so before writing code. Small platform, build, or setup changes can go
+  straight to a pull request without a story.
 - Do not add a runtime dependency without asking.
 - Secrets live in `.env` locally and in platform environment variables when deployed,
   never in the repo. This includes the Mapbox token. Flag any key that appears in a diff.
@@ -207,6 +208,8 @@ Use these exact terms in code, UI copy, and commit messages:
 - One branch per story issue, named with its number: `24-stevens-google-sign-in`.
 - Reference the issue in the commit subject (`#24 Add OAuth callback`) and close it from
   the pull request body (`Closes #24`).
+- Changes without a story use a short descriptive branch name (`rename-app-id`) and a
+  plain commit subject.
 - No direct pushes to `main`. Failing checks block merge, and every pull request needs one
   approving review.
 ## Do not guess on these
