@@ -110,216 +110,126 @@ Full breakdown lives on the [Epics/Features/Stories wiki page](../../wiki/epics-
 
 ## Getting Started
 
-### Prerequisites
+### 1. Prerequisites
 
 | Tool | Version | Needed for |
 |---|---|---|
-| **Node** | 22 LTS or newer | The React Native client |
-| **JDK** | 25 | The Spring Boot API |
-| **Docker** | any current | The local PostgreSQL + PostGIS database |
+| **Node** | 22 LTS or newer | The app |
+| **JDK** | 25 | The API (backend work only) |
+| **Docker** | any current | The local database (backend work only) |
 
-Nothing else is installed globally. Only Node is needed to work on the client.
+You also need an Expo account in the `quack-stevens-app` organization (for any build) and,
+for TestFlight, access to the Apple Developer team. Ask Andre for both.
 
-### Clone
-
-```bash
-git clone https://github.com/MikeZHONGznt/Quack-Campus-Event-Coordinator.git
-cd Quack-Campus-Event-Coordinator
-```
-
-### Run the client
-
-The client uses the native Mapbox module, so it runs from a **development build** on Android
-or iPhone, not Expo Go. Expo Go cannot load the map. TestFlight builds are covered below.
-
-**1. Mapbox token (once per developer).** In your Mapbox account, create a new public token
-named for Quack! (not the default public token):
-
-- Scopes: `styles:read`, `styles:tiles`, `fonts:read`. Uncheck every other scope.
-- Leave URL restrictions empty. Mapbox's URL restrictions do not apply to requests from
-  mobile apps, and Mapbox has no package-name restriction, so the protection is the narrow
-  scopes plus a token used only by this app. Rotate it at Mapbox if it leaks.
-
-Copy `client/.env.example` to `client/.env` and set `EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN` to that
-`pk.` token. `.env` is git-ignored. Do not commit it. The app rejects anything that is not a
-`pk.` token and shows **Map unavailable** instead of the map. No secret `sk.` download token
-is needed; Mapbox no longer requires one to fetch the SDK.
-
-**2. Build the development build (once, and again whenever native dependencies change).**
-Builds run on EAS, so no local Android toolchain is needed. The EAS project is
-`@quack-stevens-app/quack`; log in with an Expo account that is a member of
-`quack-stevens-app`:
+### 2. Clone and install
 
 ```bash
-cd client
-npx eas-cli login
-npx eas-cli build --profile development --platform android
-```
-
-The build needs no secrets. When it finishes, EAS prints a link and a QR code for the APK.
-Open it on the phone, or download the APK and drag it onto a running emulator, to install
-**Quack!**.
-
-For an iPhone, register the phone once, then build. EAS signs the build for the registered
-devices, so a new phone needs `device:create` and a fresh build:
-
-```bash
-npx eas-cli device:create
-npx eas-cli build --profile development --platform ios
-```
-
-Open the build link on the iPhone to install it, then turn on **Settings → Privacy & Security
-→ Developer Mode** when iOS asks.
-
-**3. Run.** Start the bundler, then open the installed Quack! app:
-
-```bash
-cd client
+git clone https://github.com/Andre-asn/Quack-Campus-Event-Coordinator.git
+cd Quack-Campus-Event-Coordinator/client
 npm install
-npm start
+cp .env.example .env
 ```
 
-On a phone, scan the bundler's QR code from inside the Quack! app. If the phone cannot reach
-the bundler, use `npx expo start --tunnel`. Sign in, and the map opens centered on Stevens.
+### 3. Run the app on your phone (iPhone or Android)
 
-The Android emulator is the sign-in target for local checks. With the emulator running:
+Quack! uses the native Mapbox module, so it runs in a **development build** of the app. Expo
+Go cannot load the map.
 
-```powershell
-& "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" reverse tcp:8080 tcp:8080
-cd client
-npm start
-```
-
-Press `a` in that window to open the development build on the emulator. Run `adb reverse`
-again after every emulator restart. Restart the bundler after changing `client/.env`.
-Google sign-in is configured below.
-
-### Run the API
-
-Start Docker, then:
-
-```bash
-cd api
-./gradlew bootRun        # Windows: .\gradlew.bat bootRun
-```
-
-That one command starts a local PostgreSQL + PostGIS container from `api/compose.yaml`,
-runs Flyway migrations, and serves the API on port 8080. Check it with:
-
-```bash
-curl http://localhost:8080/api/v1/health
-# {"status":"up","database":"up"}
-```
-
-The first run downloads Gradle and, if your installed JDK is not 25, a JDK 25 toolchain. The
-database container keeps running after the API stops; `docker compose -f api/compose.yaml
-down` stops it, and adding `-v` also wipes its data.
-
-Run the PostGIS spatial repository integration tests explicitly from the `api` directory:
-
-```powershell
-.\gradlew.bat test --tests edu.stevens.quack.location.SpatialRepositoryIT
-```
-
-The class contains two cases: one verifies nearby campus locations are within range, and
-the other verifies a distant location is outside the requested range. Testcontainers starts
-a throwaway PostGIS container for these tests, so Docker must be running.
-
-On macOS or Linux, use:
-
-```bash
-./gradlew test --tests edu.stevens.quack.location.SpatialRepositoryIT
-```
-
-Run the regular API test suite with `.\gradlew.bat test` on Windows or `./gradlew test` on
-macOS or Linux. `./gradlew build` is the full API build, including those integration tests.
-Docker must be running. On Windows, if `java -version` is older than 25, set `JAVA_HOME` to
-a JDK 25 before Gradle, such as the JetBrains runtime bundled with IntelliJ IDEA.
-
-Flyway runs `V1__enable_postgis.sql` and then `V2__create_users.sql`. A local database
-created while the users migration was still `V1` must be recreated:
-
-```bash
-docker compose -f api/compose.yaml down -v
-```
-
-### Google sign-in
-
-Sign-in is a Google OAuth web client. The API checks the verified email domain. The
-allowlist is `quack.auth.allowed-email-domains` in `api/src/main/resources/application.yml`
-(default `stevens.edu`). Do not enforce the domain in the client.
-
-1. In Google Cloud, create an OAuth client of type **Web application** in the same project
-   as the OAuth consent screen.
-2. On the consent screen, set the app name and a support email. While the app is in
-   testing, add every account you will use under **Test users**.
-3. Under **Authorized redirect URIs**, add this value with no trailing slash:
+1. **Mapbox token.** In your Mapbox account, create a public token with only `styles:read`,
+   `styles:tiles`, and `fonts:read`. Leave URL restrictions empty; Mapbox cannot restrict a
+   token to a mobile app. Then set `client/.env`:
 
    ```text
-   http://localhost:8080/api/v1/auth/callback
+   EXPO_PUBLIC_API_BASE_URL=https://quack-api-production.up.railway.app
+   EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN=pk.your-token
    ```
 
-4. Copy `api/.env.example` to `api/.env` and set `GOOGLE_CLIENT_ID` and
-   `GOOGLE_CLIENT_SECRET`. Leave that file uncommitted.
+2. **Build the development app.** Once, and again only when native dependencies change. From
+   `client`, log in with your `quack-stevens-app` Expo account (`npx eas-cli login`), then:
+   - **Android:** `npx eas-cli build --profile development --platform android`, and install
+     the APK from the build link.
+   - **iPhone:** register the phone once with `npx eas-cli device:create`, then
+     `npx eas-cli build --profile development --platform ios`. Install from the build link
+     and turn on **Settings → Privacy & Security → Developer Mode** when asked. A newly
+     registered phone needs a new build.
+3. Start the bundler from `client`: `npm start`.
+4. Open **Quack!** on the phone and scan the QR code from inside it. Phone and computer must
+   be on the same Wi-Fi; if the phone can't connect, run `npx expo start --tunnel` instead.
+5. Sign in with your `@stevens.edu` Google account. It must be on the Google consent
+   screen's test-user list; ask Andre to add you. The map opens centered on Stevens.
 
-`bootRun` reads those values from the process environment. From `api` on PowerShell:
+Restart `npm start` after changing `.env`. Without a token, the app shows **Map unavailable**.
 
-```powershell
-Get-Content .env | ForEach-Object { if ($_ -match '^\s*([^#=]+)=(.*)$') { Set-Item -Path "env:$($matches[1].Trim())" -Value $matches[2].Trim() } }
-.\gradlew.bat bootRun
-```
+### 4. Run the API locally (backend work only)
 
-On macOS or Linux: `set -a && source .env && set +a && ./gradlew bootRun`.
+1. Get the Google client id and secret from Andre, then `cp api/.env.example api/.env` and
+   fill in `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
+2. Start Docker, then from `api`:
 
-Google accepts `http://localhost` as a redirect host. It rejects a private IP such as
-`10.0.2.2` or `192.168.x.x`, and it rejects a tunnel hostname you do not own. The emulator
-reaches the API through `adb reverse`, so the client base URL stays `http://localhost:8080`.
+   ```bash
+   set -a && source .env && set +a && ./gradlew bootRun
+   ```
 
-The production API needs the same Google client. In Railway, set `GOOGLE_CLIENT_ID` and
-`GOOGLE_CLIENT_SECRET` on the production service, and add this redirect URI to the OAuth
-client:
+   On Windows PowerShell:
 
-```text
-https://quack-api-production.up.railway.app/api/v1/auth/callback
-```
+   ```powershell
+   Get-Content .env | ForEach-Object { if ($_ -match '^\s*([^#=]+)=(.*)$') { Set-Item -Path "env:$($matches[1].Trim())" -Value $matches[2].Trim() } }
+   .\gradlew.bat bootRun
+   ```
 
-### iOS on TestFlight
+   This starts PostgreSQL + PostGIS from `api/compose.yaml`, runs the Flyway migrations, and
+   serves the API on port 8080. Check it: `curl http://localhost:8080/api/v1/health`.
+3. To sign in against it, use the **Android emulator** (Google rejects `localhost` callbacks
+   from a real phone). Set `EXPO_PUBLIC_API_BASE_URL=http://localhost:8080` in `client/.env`,
+   then:
 
-Pull requests deploy to production, and TestFlight builds talk to production
-(`https://quack-api-production.up.railway.app`, set in `client/eas.json`). No Mac is needed;
-EAS builds and signs in the cloud. The EAS project is `@quack-stevens-app/quack`, and the
-bundle identifier is `com.quackcampus.app`.
+   ```powershell
+   & "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" reverse tcp:8080 tcp:8080
+   npm start
+   ```
 
-You need an Expo account that is a member of `quack-stevens-app`, and access to the Apple
-Developer Program team. TestFlight builds bundle the app's code on EAS, where `client/.env`
-does not exist, so store the Mapbox token in EAS once:
+   With the Android development build installed on the emulator (drag the APK onto it),
+   press `a` to open the app. Repeat `adb reverse` after each emulator restart.
+4. Run the tests with `./gradlew test` (`.\gradlew.bat test` on Windows). Docker must be
+   running; Testcontainers starts a throwaway PostGIS database.
 
-```bash
-npx eas-cli env:create --environment production --name EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN --value pk.your-token --visibility sensitive
-```
+If `java -version` is older than 25, point `JAVA_HOME` at a JDK 25 first. The database keeps
+running after the API stops; `docker compose -f api/compose.yaml down -v` stops and wipes it.
 
-From `client`, the first time:
+### 5. Ship to TestFlight (iPhone)
 
-```bash
-npx eas-cli login
-npx eas-cli build --profile production --platform ios
-```
+TestFlight builds run against the production API. EAS builds and signs them in the cloud,
+so no Mac is needed. From `client`:
 
-EAS asks you to sign in to Apple, registers the bundle identifier, and creates the
-distribution certificate and provisioning profile. Let it manage them. When the build
-finishes, upload it:
+1. Log in: `npx eas-cli login`.
+2. Build: `npx eas-cli build --profile production --platform ios`. The first time, sign in to
+   Apple when asked and let EAS create the certificate and provisioning profile.
+3. Upload: `npx eas-cli submit --platform ios --latest`. If asked for an App Store Connect API
+   key, let EAS generate one with the **App Manager** role.
+4. When Apple finishes processing (about 10–30 minutes), open App Store Connect → **Quack!** →
+   **TestFlight** → **Internal Testing**, add the build, and add testers. Testers must first
+   accept an invite under **Users and Access**.
+5. Testers install **TestFlight** on their iPhone and install Quack! from it.
 
-```bash
-npx eas-cli submit --platform ios --latest
-```
+Each later release is steps 2 and 3 again; EAS bumps the build number.
 
-The first submit creates the app in App Store Connect. The store name must be unique across
-the App Store, so pick another if **Quack!** is taken; the name on the home screen stays
-**Quack!**. After Apple finishes processing, open App Store Connect → the app → **TestFlight**,
-add teammates to an internal testing group, and they install the build from the TestFlight
-app. Internal testers need no review. External testers need Beta App Review first.
+### One-time setup (maintainers)
 
-Later builds are the same two commands. EAS increments the build number.
+- **Google sign-in** is one OAuth client of type **Web application**. Its authorized
+  redirect URIs are `http://localhost:8080/api/v1/auth/callback` and
+  `https://quack-api-production.up.railway.app/api/v1/auth/callback`, with no trailing slash.
+  Test users are listed on the OAuth consent screen.
+- **Railway** production sets `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
+- The allowed email domains are `quack.auth.allowed-email-domains` in
+  `api/src/main/resources/application.yml` (default `stevens.edu`). The client never checks
+  the domain.
+- EAS project: `@quack-stevens-app/quack`. App id on both platforms: `com.quackcampus.app`.
+- TestFlight builds can't see `client/.env`, so the Mapbox token lives in EAS (already set).
+  To change it, run from `client`:
+
+  ```bash
+  npx eas-cli env:set production --name EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN --value pk.your-token --visibility sensitive
+  ```
 
 ### Device verification
 
@@ -347,9 +257,9 @@ api/                     Spring Boot API (Java 25, Spring Boot 4, Gradle wrapper
 client/                  React Native client (Expo SDK 57, TypeScript)
   app.json               Expo config: EAS project id and the @rnmapbox/maps plugin
   eas.json               EAS profiles: development build and production (TestFlight)
-  App.tsx                Sign-in screen, then the campus map
-  src/CampusMap.tsx      Mapbox map centered on Stevens
-  .env.example           API base URL and public Mapbox token placeholders
+  App.tsx                Loading, sign-in, and map screens
+  src/CampusMap.tsx      Mapbox map centered on Stevens, 3D with time-of-day lighting
+  .env.example           API base URL and Mapbox token placeholders
 ```
 
 ## Contributing
