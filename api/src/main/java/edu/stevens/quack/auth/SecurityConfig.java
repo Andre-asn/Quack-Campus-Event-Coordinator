@@ -5,6 +5,9 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
+import org.springframework.security.oauth2.client.web.DefaultOAuth2AuthorizationRequestResolver;
+import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestResolver;
 import org.springframework.security.web.SecurityFilterChain;
 
 @Configuration
@@ -14,6 +17,7 @@ public class SecurityConfig {
     @Bean
     SecurityFilterChain securityFilterChain(
             HttpSecurity http,
+            ClientRegistrationRepository clientRegistrations,
             GoogleOidcUserService oidcUserService,
             SignInSuccessHandler successHandler,
             SignInFailureHandler failureHandler,
@@ -32,10 +36,22 @@ public class SecurityConfig {
                 .requestMatchers("/oauth2/authorization/**", "/error").permitAll()
                 .anyRequest().authenticated());
         http.oauth2Login(oauth -> oauth
+                .authorizationEndpoint(endpoint -> endpoint.authorizationRequestResolver(
+                        authorizationRequestResolver(clientRegistrations)))
                 .userInfoEndpoint(userInfo -> userInfo.oidcUserService(oidcUserService))
                 .redirectionEndpoint(endpoint -> endpoint.baseUri("/api/v1/auth/callback"))
                 .successHandler(successHandler)
                 .failureHandler(failureHandler));
         return http.build();
+    }
+
+    private static OAuth2AuthorizationRequestResolver authorizationRequestResolver(
+            ClientRegistrationRepository clientRegistrations) {
+        DefaultOAuth2AuthorizationRequestResolver resolver = new DefaultOAuth2AuthorizationRequestResolver(
+                clientRegistrations, "/oauth2/authorization");
+        // Chrome keeps the last Google account. Ask every time so a signed-out user can pick another one.
+        resolver.setAuthorizationRequestCustomizer(builder -> builder.additionalParameters(
+                params -> params.put("prompt", "select_account")));
+        return resolver;
     }
 }
