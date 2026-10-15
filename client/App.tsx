@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { Pressable, StatusBar as NativeStatusBar, StyleSheet, Text, View } from 'react-native';
-import { StatusBar } from 'expo-status-bar';
 import {
   BricolageGrotesque_600SemiBold,
   BricolageGrotesque_700Bold,
@@ -106,7 +105,6 @@ export default function App() {
         </Pressable>
         {screen.message ? <Text style={styles.chipError}>{screen.message}</Text> : null}
       </View>
-      <StatusBar style="dark" />
     </View>
   );
 }
