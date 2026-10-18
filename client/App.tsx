@@ -1,17 +1,30 @@
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import {
+  BricolageGrotesque_600SemiBold,
+  BricolageGrotesque_700Bold,
+  BricolageGrotesque_800ExtraBold,
+  useFonts,
+} from '@expo-google-fonts/bricolage-grotesque';
 
+import LoadingScreen from './src/LoadingScreen';
+import SignInScreen, { type SignInError } from './src/SignInScreen';
 import { restoreSession, signInWithGoogle, signOut } from './src/auth';
 import type { StoredSession } from './src/sessionStore';
 
 type Screen =
   | { status: 'loading' }
-  | { status: 'signed-out'; message: string | null; busy: boolean }
+  | { status: 'signed-out'; error: SignInError | null; busy: boolean }
   | { status: 'signed-in'; session: StoredSession; message: string | null; busy: boolean };
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>({ status: 'loading' });
+  const [fontsLoaded, fontError] = useFonts({
+    BricolageGrotesque_600SemiBold,
+    BricolageGrotesque_700Bold,
+    BricolageGrotesque_800ExtraBold,
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -22,11 +35,11 @@ export default function App() {
         }
         setScreen(session
           ? { status: 'signed-in', session, message: null, busy: false }
-          : { status: 'signed-out', message: null, busy: false });
+          : { status: 'signed-out', error: null, busy: false });
       })
       .catch(() => {
         if (!cancelled) {
-          setScreen({ status: 'signed-out', message: null, busy: false });
+          setScreen({ status: 'signed-out', error: null, busy: false });
         }
       });
     return () => {
@@ -35,7 +48,9 @@ export default function App() {
   }, []);
 
   async function onSignIn() {
-    setScreen({ status: 'signed-out', message: null, busy: true });
+    // Keep the last error on screen while the browser is open.
+    const previous = screen.status === 'signed-out' ? screen.error : null;
+    setScreen({ status: 'signed-out', error: previous, busy: true });
     try {
       const result = await signInWithGoogle();
       if (result.type === 'success') {
@@ -44,11 +59,11 @@ export default function App() {
       }
       setScreen({
         status: 'signed-out',
-        message: result.type === 'error' ? messageFor(result.code) : null,
+        error: result.type === 'error' ? { code: result.code, email: result.email ?? null } : previous,
         busy: false,
       });
     } catch {
-      setScreen({ status: 'signed-out', message: 'Sign-in failed. Try again.', busy: false });
+      setScreen({ status: 'signed-out', error: { code: 'SIGN_IN_FAILED', email: null }, busy: false });
     }
   }
 
@@ -59,65 +74,40 @@ export default function App() {
     setScreen({ ...screen, busy: true, message: null });
     const outcome = await signOut(screen.session.sessionId);
     if (outcome === 'signed-out') {
-      setScreen({ status: 'signed-out', message: null, busy: false });
+      setScreen({ status: 'signed-out', error: null, busy: false });
       return;
     }
     setScreen({ ...screen, busy: false, message: 'Could not sign out. Try again.' });
   }
 
+  // A font that fails to load falls back to the system font rather than blocking sign-in.
+  if (screen.status === 'loading' || (!fontsLoaded && !fontError)) {
+    return <LoadingScreen />;
+  }
+
+  if (screen.status === 'signed-out') {
+    return <SignInScreen busy={screen.busy} error={screen.error} onSignIn={() => void onSignIn()} />;
+  }
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Quack!</Text>
-      {screen.status === 'loading' ? <Text style={styles.body}>Restoring session...</Text> : null}
-      {screen.status === 'signed-out' ? (
-        <>
-          <Text style={styles.body}>Sign in with your Stevens Google account.</Text>
-          {screen.message ? <Text style={styles.error}>{screen.message}</Text> : null}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Sign in with Stevens Google"
-            accessibilityState={{ disabled: screen.busy }}
-            disabled={screen.busy}
-            onPress={() => void onSignIn()}
-            style={styles.button}
-          >
-            <Text style={styles.buttonText}>{screen.busy ? 'Signing in...' : 'Sign in with Stevens Google'}</Text>
-          </Pressable>
-        </>
-      ) : null}
-      {screen.status === 'signed-in' ? (
-        <>
-          <Text style={styles.body}>Signed in as {screen.session.user.displayName}</Text>
-          <Text style={styles.email}>{screen.session.user.email}</Text>
-          {screen.message ? <Text style={styles.error}>{screen.message}</Text> : null}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Sign out"
-            accessibilityState={{ disabled: screen.busy }}
-            disabled={screen.busy}
-            onPress={() => void onSignOut()}
-            style={styles.button}
-          >
-            <Text style={styles.buttonText}>{screen.busy ? 'Signing out...' : 'Sign out'}</Text>
-          </Pressable>
-        </>
-      ) : null}
+      <Text style={styles.body}>Signed in as {screen.session.user.displayName}</Text>
+      <Text style={styles.email}>{screen.session.user.email}</Text>
+      {screen.message ? <Text style={styles.error}>{screen.message}</Text> : null}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Sign out"
+        accessibilityState={{ disabled: screen.busy }}
+        disabled={screen.busy}
+        onPress={() => void onSignOut()}
+        style={styles.button}
+      >
+        <Text style={styles.buttonText}>{screen.busy ? 'Signing out...' : 'Sign out'}</Text>
+      </Pressable>
       <StatusBar style="auto" />
     </View>
   );
-}
-
-function messageFor(code: string): string {
-  switch (code) {
-    case 'DOMAIN_NOT_ALLOWED':
-      return 'Use a Stevens Google account to sign in.';
-    case 'EMAIL_NOT_VERIFIED':
-      return "That Google account's email is not verified.";
-    case 'SEED_ACCOUNT':
-      return 'This account cannot sign in.';
-    default:
-      return 'Sign-in failed. Try again.';
-  }
 }
 
 const styles = StyleSheet.create({

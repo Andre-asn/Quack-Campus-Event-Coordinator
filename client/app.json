@@ -21,6 +21,9 @@
     "ios": {
       "bundleIdentifier": "edu.stevens.quack",
       "supportsTablet": false
-    }
+    },
+    "plugins": [
+      "expo-font"
+    ]
   }
 }

@@ -9,7 +9,7 @@ WebBrowser.maybeCompleteAuthSession();
 export type SignInResult =
   | { type: 'success'; session: StoredSession }
   | { type: 'cancel' }
-  | { type: 'error'; code: string };
+  | { type: 'error'; code: string; email?: string };
 
 export async function restoreSession(): Promise<StoredSession | null> {
   const stored = await loadSession();
@@ -44,7 +44,8 @@ export async function signInWithGoogle(): Promise<SignInResult> {
   }
   const error = queryParam(result.url, 'error');
   if (error) {
-    return { type: 'error', code: error };
+    // The API names the rejected account so the sign-in screen can say which one it saw.
+    return { type: 'error', code: error, email: queryParam(result.url, 'email') ?? undefined };
   }
   const handoff = queryParam(result.url, 'handoff');
   if (!handoff) {

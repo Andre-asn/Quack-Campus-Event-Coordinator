@@ -9,16 +9,20 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@expo-google-fonts/bricolage-grotesque": "^0.4.1",
     "expo": "~57.0.26",
+    "expo-font": "~57.0.4",
     "expo-linking": "~57.0.11",
     "expo-secure-store": "~57.0.4",
     "expo-status-bar": "~57.0.1",
     "expo-web-browser": "~57.0.3",
     "react": "19.2.3",
-    "react-native": "0.86.3"
+    "react-native": "0.86.3",
+    "react-native-svg": "15.15.4"
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
+    "react-native-svg-transformer": "^1.5.3",
     "typescript": "~6.0.3"
   }
 }

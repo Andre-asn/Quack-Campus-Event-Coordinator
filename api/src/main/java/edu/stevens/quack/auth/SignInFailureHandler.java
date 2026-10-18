@@ -33,7 +33,11 @@ public class SignInFailureHandler implements AuthenticationFailureHandler {
         new SecurityContextLogoutHandler().logout(request, response, null);
         String code = errorCode(exception);
         if (appRedirect != null) {
-            response.sendRedirect(SignInSuccessHandler.appendQuery(appRedirect, "error", code));
+            String redirect = SignInSuccessHandler.appendQuery(appRedirect, "error", code);
+            if (exception.getCause() instanceof SignInRejectedException rejected && rejected.rejectedEmail() != null) {
+                redirect = SignInSuccessHandler.appendQuery(redirect, "email", rejected.rejectedEmail());
+            }
+            response.sendRedirect(redirect);
             return;
         }
         ApiProblems.write(response, ApiProblems.of(
