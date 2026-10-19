@@ -51,8 +51,9 @@ Quack! creates a low-commitment coordination layer for what's happening around c
 | **JDK** | 25 | The API (backend work only) |
 | **Docker** | any current | The local database (backend work only) |
 
-You also need an Expo account in the `quack-stevens-app` organization (for any build) and,
-for TestFlight, access to the Apple Developer team. Ask Andre for both.
+You also need an Expo account in the `quack-stevens-app` organization; ask Andre to add you.
+You don't need Apple Developer access: iPhone builds and TestFlight uploads run on Andre's
+account, and he adds you as a TestFlight tester.
 
 ### 2. Clone and install
 
@@ -77,10 +78,12 @@ Go cannot load the map.
    `client`:
    - **Android:** `npx eas-cli build --profile development --platform android`, and install
      the APK from the build link.
-   - **iPhone:** register the phone once with `npx eas-cli device:create`, then
-     `npx eas-cli build --profile development --platform ios`. Install from the build link
-     and turn on **Settings → Privacy & Security → Developer Mode** when asked. A newly
-     registered phone needs a new build.
+   - **iPhone:** run `npx eas-cli device:create` and open the link it gives you on your
+     iPhone to register it. Then ask Andre to rebuild: iPhone builds are signed with his
+     Apple Developer account, so he runs
+     `npx eas-cli build --profile development --platform ios` and sends you the install
+     link. Install it, then turn on **Settings → Privacy & Security → Developer Mode** when
+     asked.
 2. Start the bundler from `client`: `npm start`.
 3. Open **Quack!** on the phone and scan the QR code from inside it. Phone and computer must
    be on the same Wi-Fi; if the phone can't connect, run `npx expo start --tunnel` instead.
