@@ -2,13 +2,14 @@
   "expo": {
     "name": "Quack!",
     "slug": "quack",
+    "owner": "quack-stevens-app",
     "version": "0.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "quack",
     "userInterfaceStyle": "light",
     "android": {
-      "package": "edu.stevens.quack",
+      "package": "com.quackcampus.app",
       "usesCleartextTraffic": true,
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
@@ -19,11 +20,19 @@
       "predictiveBackGestureEnabled": false
     },
     "ios": {
-      "bundleIdentifier": "edu.stevens.quack",
-      "supportsTablet": false
+      "bundleIdentifier": "com.quackcampus.app",
+      "supportsTablet": false,
+      "config": {
+        "usesNonExemptEncryption": false
+      }
     },
     "plugins": [
       "expo-font"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "e7e266f5-1d8c-45bd-a166-39195637d742"
+      }
+    }
   }
 }
