@@ -118,8 +118,8 @@ Full breakdown lives on the [Epics/Features/Stories wiki page](../../wiki/epics-
 | **JDK** | 25 | The API (backend work only) |
 | **Docker** | any current | The local database (backend work only) |
 
-For TestFlight builds you also need an Expo account in the `quack-stevens-app` organization
-and access to the Apple Developer team. Ask Andre for both.
+You also need an Expo account in the `quack-stevens-app` organization (for any build) and,
+for TestFlight, access to the Apple Developer team. Ask Andre for both.
 
 ### 2. Clone and install
 
@@ -132,27 +132,33 @@ cp .env.example .env
 
 ### 3. Run the app on your phone (iPhone or Android)
 
-1. Install **Expo Go** from the App Store or Play Store.
-2. Point the app at the production API. In `client/.env`:
+Quack! uses the native Mapbox module, so it runs in a **development build** of the app. Expo
+Go cannot load the map.
+
+1. **Mapbox token.** In your Mapbox account, create a public token with only `styles:read`,
+   `styles:tiles`, and `fonts:read`. Leave URL restrictions empty; Mapbox cannot restrict a
+   token to a mobile app. Then set `client/.env`:
 
    ```text
    EXPO_PUBLIC_API_BASE_URL=https://quack-api-production.up.railway.app
+   EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN=pk.your-token
    ```
 
-3. Start the bundler from `client`:
-
-   ```bash
-   npm start
-   ```
-
-4. Scan the QR code. **Android:** use Expo Go's scanner. **iPhone:** use the Camera app, and
-   sign in to the same Expo account in Expo Go and on your computer (`npx expo login`).
-   Phone and computer must be on the same Wi-Fi; if the phone can't connect, run
-   `npx expo start --tunnel` instead.
+2. **Build the development app.** Once, and again only when native dependencies change. From
+   `client`, log in with your `quack-stevens-app` Expo account (`npx eas-cli login`), then:
+   - **Android:** `npx eas-cli build --profile development --platform android`, and install
+     the APK from the build link.
+   - **iPhone:** register the phone once with `npx eas-cli device:create`, then
+     `npx eas-cli build --profile development --platform ios`. Install from the build link
+     and turn on **Settings → Privacy & Security → Developer Mode** when asked. A newly
+     registered phone needs a new build.
+3. Start the bundler from `client`: `npm start`.
+4. Open **Quack!** on the phone and scan the QR code from inside it. Phone and computer must
+   be on the same Wi-Fi; if the phone can't connect, run `npx expo start --tunnel` instead.
 5. Sign in with your `@stevens.edu` Google account. It must be on the Google consent
-   screen's test-user list; ask Andre to add you.
+   screen's test-user list; ask Andre to add you. The map opens centered on Stevens.
 
-Restart `npm start` after changing `.env`.
+Restart `npm start` after changing `.env`. Without a token, the app shows **Map unavailable**.
 
 ### 4. Run the API locally (backend work only)
 
@@ -182,7 +188,8 @@ Restart `npm start` after changing `.env`.
    npm start
    ```
 
-   Press `a` to open the app on the emulator. Repeat `adb reverse` after each emulator restart.
+   With the Android development build installed on the emulator (drag the APK onto it),
+   press `a` to open the app. Repeat `adb reverse` after each emulator restart.
 4. Run the tests with `./gradlew test` (`.\gradlew.bat test` on Windows). Docker must be
    running; Testcontainers starts a throwaway PostGIS database.
 
@@ -217,6 +224,12 @@ Each later release is steps 2 and 3 again; EAS bumps the build number.
   `api/src/main/resources/application.yml` (default `stevens.edu`). The client never checks
   the domain.
 - EAS project: `@quack-stevens-app/quack`. App id on both platforms: `com.quackcampus.app`.
+- TestFlight builds can't see `client/.env`, so the Mapbox token lives in EAS (already set).
+  To change it, run from `client`:
+
+  ```bash
+  npx eas-cli env:set production --name EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN --value pk.your-token --visibility sensitive
+  ```
 
 ### Device verification
 
@@ -242,10 +255,11 @@ api/                     Spring Boot API (Java 25, Spring Boot 4, Gradle wrapper
     application.yml      Configuration; deployed values come from environment variables
     db/migration/        Flyway migrations
 client/                  React Native client (Expo SDK 57, TypeScript)
-  app.json               Expo config, including the EAS project id
-  eas.json               EAS production profile for TestFlight builds
-  App.tsx                Loading, sign-in, and signed-in screens
-  .env.example           API base URL for the app
+  app.json               Expo config: EAS project id and the @rnmapbox/maps plugin
+  eas.json               EAS profiles: development build and production (TestFlight)
+  App.tsx                Loading, sign-in, and map screens
+  src/CampusMap.tsx      Mapbox map centered on Stevens, 3D with time-of-day lighting
+  .env.example           API base URL and Mapbox token placeholders
 ```
 
 ## Contributing

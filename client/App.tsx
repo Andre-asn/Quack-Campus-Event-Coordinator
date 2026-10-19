@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { StatusBar } from 'expo-status-bar';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   BricolageGrotesque_600SemiBold,
   BricolageGrotesque_700Bold,
@@ -8,6 +8,7 @@ import {
   useFonts,
 } from '@expo-google-fonts/bricolage-grotesque';
 
+import CampusMap from './src/CampusMap';
 import LoadingScreen from './src/LoadingScreen';
 import SignInScreen, { type SignInError } from './src/SignInScreen';
 import { restoreSession, signInWithGoogle, signOut } from './src/auth';
@@ -19,6 +20,15 @@ type Screen =
   | { status: 'signed-in'; session: StoredSession; message: string | null; busy: boolean };
 
 export default function App() {
+  return (
+    <SafeAreaProvider>
+      <QuackApp />
+    </SafeAreaProvider>
+  );
+}
+
+function QuackApp() {
+  const insets = useSafeAreaInsets();
   const [screen, setScreen] = useState<Screen>({ status: 'loading' });
   const [fontsLoaded, fontError] = useFonts({
     BricolageGrotesque_600SemiBold,
@@ -90,59 +100,57 @@ export default function App() {
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Quack!</Text>
-      <Text style={styles.body}>Signed in as {screen.session.user.displayName}</Text>
-      <Text style={styles.email}>{screen.session.user.email}</Text>
-      {screen.message ? <Text style={styles.error}>{screen.message}</Text> : null}
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Sign out"
-        accessibilityState={{ disabled: screen.busy }}
-        disabled={screen.busy}
-        onPress={() => void onSignOut()}
-        style={styles.button}
-      >
-        <Text style={styles.buttonText}>{screen.busy ? 'Signing out...' : 'Sign out'}</Text>
-      </Pressable>
-      <StatusBar style="auto" />
+    <View style={styles.home}>
+      <CampusMap />
+      {/* Clears the status bar, notch, or Dynamic Island while the map stays full-screen. */}
+      <View pointerEvents="box-none" style={[styles.overlay, { paddingTop: insets.top + 12 }]}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Sign out ${screen.session.user.email}`}
+          accessibilityState={{ disabled: screen.busy }}
+          disabled={screen.busy}
+          onPress={() => void onSignOut()}
+          style={({ pressed }) => [styles.chip, pressed && styles.pressed]}
+        >
+          <Text style={styles.chipText}>{screen.busy ? 'Signing out...' : 'Sign out'}</Text>
+        </Pressable>
+        {screen.message ? <Text style={styles.chipError}>{screen.message}</Text> : null}
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    alignItems: 'center',
-    backgroundColor: '#fff',
+  home: {
     flex: 1,
-    gap: 8,
-    justifyContent: 'center',
-    padding: 24,
   },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-  },
-  body: {
-    color: '#444',
-    textAlign: 'center',
-  },
-  email: {
-    color: '#666',
-  },
-  error: {
-    color: '#8a1f1f',
-    textAlign: 'center',
-  },
-  button: {
-    backgroundColor: '#111',
-    borderRadius: 8,
-    marginTop: 8,
+  overlay: {
+    alignItems: 'flex-end',
+    gap: 6,
     paddingHorizontal: 16,
-    paddingVertical: 12,
   },
-  buttonText: {
-    color: '#fff',
+  chip: {
+    backgroundColor: '#fff',
+    borderRadius: 999,
+    elevation: 3,
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  pressed: {
+    opacity: 0.85,
+    transform: [{ scale: 0.97 }],
+  },
+  chipText: {
+    color: '#111',
     fontWeight: '600',
+  },
+  chipError: {
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    color: '#8a1f1f',
+    elevation: 3,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
 });
