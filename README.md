@@ -52,8 +52,13 @@ Quack! creates a low-commitment coordination layer for what's happening around c
 | **Docker** | any current | The local database (backend work only) |
 
 You also need an Expo account in the `quack-stevens-app` organization; ask Andre to add you.
-You don't need Apple Developer access: iPhone builds and TestFlight uploads run on Andre's
-account, and he adds you as a TestFlight tester.
+You don't need an Apple account: iPhone builds and TestFlight uploads sign in to Apple with
+an API key stored in EAS. Ask Andre to add you as a TestFlight tester.
+
+> **Before any iPhone build or TestFlight upload, sync your computer's clock.** If it runs
+> even a second ahead, Apple rejects EAS's key with a `401` and EAS asks for an Apple login
+> ([expo/eas-cli#4623](https://github.com/expo/eas-cli/issues/4623)). On Windows: Settings →
+> Time & language → Date & time → **Sync now**. Macs sync automatically.
 
 ### 2. Clone and install
 
@@ -78,12 +83,17 @@ Go cannot load the map.
    `client`:
    - **Android:** `npx eas-cli build --profile development --platform android`, and install
      the APK from the build link.
-   - **iPhone:** run `npx eas-cli device:create` and open the link it gives you on your
-     iPhone to register it. Then ask Andre to rebuild: iPhone builds are signed with his
-     Apple Developer account, so he runs
-     `npx eas-cli build --profile development --platform ios` and sends you the install
-     link. Install it, then turn on **Settings → Privacy & Security → Developer Mode** when
-     asked.
+   - **iPhone:** register the phone once with `npx eas-cli device:create` and open the link
+     it gives you on the iPhone. Then build:
+
+     ```bash
+     npx eas-cli build --profile development --platform ios --non-interactive --refresh-ad-hoc-provisioning-profile
+     ```
+
+     If asked, the Apple Team ID is `S22XHSZG77` and the team type is **Individual**. Never
+     log in to Apple; if EAS asks, press Ctrl+C, sync your clock, and run it again. Install
+     from the build link, then turn on **Settings → Privacy & Security → Developer Mode**
+     when asked.
 2. Start the bundler from `client`: `npm start`.
 3. Open **Quack!** on the phone and scan the QR code from inside it. Phone and computer must
    be on the same Wi-Fi; if the phone can't connect, run `npx expo start --tunnel` instead.
@@ -134,11 +144,11 @@ running after the API stops; `docker compose -f api/compose.yaml down -v` stops 
 TestFlight builds run against the production API. EAS builds and signs them in the cloud,
 so no Mac is needed. From `client`:
 
-1. Log in: `npx eas-cli login`.
-2. Build: `npx eas-cli build --profile production --platform ios`. The first time, sign in to
-   Apple when asked and let EAS create the certificate and provisioning profile.
-3. Upload: `npx eas-cli submit --platform ios --latest`. If asked for an App Store Connect API
-   key, let EAS generate one with the **App Manager** role.
+1. Log in: `npx eas-cli login`, and sync your clock (see Prerequisites).
+2. Build: `npx eas-cli build --profile production --platform ios --non-interactive`. EAS
+   uses the signing credentials it already stores.
+3. Upload: `npx eas-cli submit --platform ios --latest --non-interactive`. EAS uses the
+   App Store Connect API key it stores.
 4. When Apple finishes processing (about 10–30 minutes), open App Store Connect → **Quack!** →
    **TestFlight** → **Internal Testing**, add the build, and add testers. Testers must first
    accept an invite under **Users and Access**.
@@ -157,6 +167,12 @@ Each later release is steps 2 and 3 again; EAS bumps the build number.
   `api/src/main/resources/application.yml` (default `stevens.edu`). The client never checks
   the domain.
 - EAS project: `@quack-stevens-app/quack`. App id on both platforms: `com.quackcampus.app`.
+  Apple Team ID `S22XHSZG77` (Individual membership).
+- Apple access for builds is an **Admin** App Store Connect team API key stored in EAS and
+  assigned to the project for EAS Submit. Its `.p8` file is in Andre's password manager. To
+  replace it, run `npx eas-cli credentials` from `client` → iOS → Manage your API Key → add
+  the new key → **Use an existing API Key**. New teammates need an Expo org seat, plus an
+  App Store Connect user (Developer role) to be a TestFlight tester.
 - App settings live in EAS, never in the repo. The Mapbox token is a public `pk.` token with
   only `styles:read`, `styles:tiles`, and `fonts:read` (Mapbox can't restrict tokens to a
   mobile app). The `development` environment holds the token and the API URL that teammates
