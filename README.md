@@ -51,8 +51,14 @@ Quack! creates a low-commitment coordination layer for what's happening around c
 | **JDK** | 25 | The API (backend work only) |
 | **Docker** | any current | The local database (backend work only) |
 
-You also need an Expo account in the `quack-stevens-app` organization (for any build) and,
-for TestFlight, access to the Apple Developer team. Ask Andre for both.
+You also need an Expo account in the `quack-stevens-app` organization; ask Andre to add you.
+You don't need an Apple account: iPhone builds and TestFlight uploads sign in to Apple with
+an API key stored in EAS. Ask Andre to add you as a TestFlight tester.
+
+> **Before any iPhone build or TestFlight upload, sync your computer's clock.** If it runs
+> even a second ahead, Apple rejects EAS's key with a `401` and EAS asks for an Apple login
+> ([expo/eas-cli#4623](https://github.com/expo/eas-cli/issues/4623)). On Windows: Settings →
+> Time & language → Date & time → **Sync now**. Macs sync automatically.
 
 ### 2. Clone and install
 
@@ -60,38 +66,42 @@ for TestFlight, access to the Apple Developer team. Ask Andre for both.
 git clone https://github.com/Andre-asn/Quack-Campus-Event-Coordinator.git
 cd Quack-Campus-Event-Coordinator/client
 npm install
-cp .env.example .env
+npx eas-cli login
+npx eas-cli env:pull development
 ```
+
+Log in with your `quack-stevens-app` Expo account. `env:pull` writes `client/.env.local` with
+the app's settings (the production API and the team's Mapbox token). It is git-ignored; run
+it again if the settings change.
 
 ### 3. Run the app on your phone (iPhone or Android)
 
 Quack! uses the native Mapbox module, so it runs in a **development build** of the app. Expo
 Go cannot load the map.
 
-1. **Mapbox token.** In your Mapbox account, create a public token with only `styles:read`,
-   `styles:tiles`, and `fonts:read`. Leave URL restrictions empty; Mapbox cannot restrict a
-   token to a mobile app. Then set `client/.env`:
-
-   ```text
-   EXPO_PUBLIC_API_BASE_URL=https://quack-api-production.up.railway.app
-   EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN=pk.your-token
-   ```
-
-2. **Build the development app.** Once, and again only when native dependencies change. From
-   `client`, log in with your `quack-stevens-app` Expo account (`npx eas-cli login`), then:
+1. **Build the development app.** Once, and again only when native dependencies change. From
+   `client`:
    - **Android:** `npx eas-cli build --profile development --platform android`, and install
      the APK from the build link.
-   - **iPhone:** register the phone once with `npx eas-cli device:create`, then
-     `npx eas-cli build --profile development --platform ios`. Install from the build link
-     and turn on **Settings → Privacy & Security → Developer Mode** when asked. A newly
-     registered phone needs a new build.
-3. Start the bundler from `client`: `npm start`.
-4. Open **Quack!** on the phone and scan the QR code from inside it. Phone and computer must
+   - **iPhone:** register the phone once with `npx eas-cli device:create` and open the link
+     it gives you on the iPhone. Then build:
+
+     ```bash
+     npx eas-cli build --profile development --platform ios --non-interactive --refresh-ad-hoc-provisioning-profile
+     ```
+
+     If asked, the Apple Team ID is `S22XHSZG77` and the team type is **Individual**. Never
+     log in to Apple; if EAS asks, press Ctrl+C, sync your clock, and run it again. Install
+     from the build link, then turn on **Settings → Privacy & Security → Developer Mode**
+     when asked.
+2. Start the bundler from `client`: `npm start`.
+3. Open **Quack!** on the phone and scan the QR code from inside it. Phone and computer must
    be on the same Wi-Fi; if the phone can't connect, run `npx expo start --tunnel` instead.
-5. Sign in with your `@stevens.edu` Google account. It must be on the Google consent
+4. Sign in with your `@stevens.edu` Google account. It must be on the Google consent
    screen's test-user list; ask Andre to add you. The map opens centered on Stevens.
 
-Restart `npm start` after changing `.env`. Without a token, the app shows **Map unavailable**.
+If the app shows **Map unavailable**, `client/.env.local` is missing; rerun the `env:pull`
+command from step 2 and restart `npm start`.
 
 ### 4. Run the API locally (backend work only)
 
@@ -113,8 +123,8 @@ Restart `npm start` after changing `.env`. Without a token, the app shows **Map 
    This starts PostgreSQL + PostGIS from `api/compose.yaml`, runs the Flyway migrations, and
    serves the API on port 8080. Check it: `curl http://localhost:8080/api/v1/health`.
 3. To sign in against it, use the **Android emulator** (Google rejects `localhost` callbacks
-   from a real phone). Set `EXPO_PUBLIC_API_BASE_URL=http://localhost:8080` in `client/.env`,
-   then:
+   from a real phone). Change `EXPO_PUBLIC_API_BASE_URL` to `http://localhost:8080` in
+   `client/.env.local`, then:
 
    ```powershell
    & "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" reverse tcp:8080 tcp:8080
@@ -134,11 +144,11 @@ running after the API stops; `docker compose -f api/compose.yaml down -v` stops 
 TestFlight builds run against the production API. EAS builds and signs them in the cloud,
 so no Mac is needed. From `client`:
 
-1. Log in: `npx eas-cli login`.
-2. Build: `npx eas-cli build --profile production --platform ios`. The first time, sign in to
-   Apple when asked and let EAS create the certificate and provisioning profile.
-3. Upload: `npx eas-cli submit --platform ios --latest`. If asked for an App Store Connect API
-   key, let EAS generate one with the **App Manager** role.
+1. Log in: `npx eas-cli login`, and sync your clock (see Prerequisites).
+2. Build: `npx eas-cli build --profile production --platform ios --non-interactive`. EAS
+   uses the signing credentials it already stores.
+3. Upload: `npx eas-cli submit --platform ios --latest --non-interactive`. EAS uses the
+   App Store Connect API key it stores.
 4. When Apple finishes processing (about 10–30 minutes), open App Store Connect → **Quack!** →
    **TestFlight** → **Internal Testing**, add the build, and add testers. Testers must first
    accept an invite under **Users and Access**.
@@ -157,10 +167,21 @@ Each later release is steps 2 and 3 again; EAS bumps the build number.
   `api/src/main/resources/application.yml` (default `stevens.edu`). The client never checks
   the domain.
 - EAS project: `@quack-stevens-app/quack`. App id on both platforms: `com.quackcampus.app`.
-- TestFlight builds can't see `client/.env`, so the Mapbox token lives in EAS (already set).
-  To change it, run from `client`:
+  Apple Team ID `S22XHSZG77` (Individual membership).
+- Apple access for builds is an **Admin** App Store Connect team API key stored in EAS and
+  assigned to the project for EAS Submit. Its `.p8` file is in Andre's password manager. To
+  replace it, run `npx eas-cli credentials` from `client` → iOS → Manage your API Key → add
+  the new key → **Use an existing API Key**. New teammates need an Expo org seat, plus an
+  App Store Connect user (Developer role) to be a TestFlight tester.
+- App settings live in EAS, never in the repo. The Mapbox token is a public `pk.` token with
+  only `styles:read`, `styles:tiles`, and `fonts:read` (Mapbox can't restrict tokens to a
+  mobile app). The `development` environment holds the token and the API URL that teammates
+  pull; the `production` environment holds the token for TestFlight builds (the API URL is
+  in `client/eas.json`). To change them, run from `client`:
 
   ```bash
+  npx eas-cli env:set development --name EXPO_PUBLIC_API_BASE_URL --value https://quack-api-production.up.railway.app --visibility plaintext
+  npx eas-cli env:set development --name EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN --value pk.your-token --visibility sensitive
   npx eas-cli env:set production --name EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN --value pk.your-token --visibility sensitive
   ```
 
