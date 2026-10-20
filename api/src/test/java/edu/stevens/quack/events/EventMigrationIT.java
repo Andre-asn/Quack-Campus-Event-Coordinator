@@ -28,6 +28,7 @@ class EventMigrationIT {
     @Autowired
     JdbcTemplate jdbc;
 
+    /** Verifies Flyway creates the events table. */
     @Test
     void flywayCreatesEventsTable() {
         String table = jdbc.queryForObject(
@@ -37,6 +38,7 @@ class EventMigrationIT {
         assertThat(table).isEqualTo("events");
     }
 
+    /** Verifies event locations use the PostGIS geography point type. */
     @Test
     void locationUsesPostgisGeographyPoint() {
         String type = jdbc.queryForObject("""
@@ -49,6 +51,7 @@ class EventMigrationIT {
         assertThat(type).isEqualToIgnoringCase("geography(Point,4326)");
     }
 
+    /** Verifies the migration creates the required event indexes. */
     @Test
     void requiredIndexesExist() {
         var indexes = jdbc.queryForList("""
@@ -65,6 +68,7 @@ class EventMigrationIT {
                 "events_share_token_unique_idx");
     }
 
+    /** Verifies an event can be inserted for an existing host. */
     @Test
     void insertsEventForExistingHost() {
         UUID hostId = insertHost();
@@ -78,30 +82,35 @@ class EventMigrationIT {
         assertThat(count).isEqualTo(1);
     }
 
+    /** Verifies the host foreign key rejects an event with no matching user. */
     @Test
     void rejectsEventWithNonexistentHost() {
         assertThatThrownBy(() -> insertEvent(UUID.randomUUID(), "study", "public", null, "active"))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 
+    /** Verifies the category constraint rejects unsupported values. */
     @Test
     void rejectsInvalidCategory() {
         assertThatThrownBy(() -> insertEvent(insertHost(), "invalid", "public", null, "active"))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 
+    /** Verifies the visibility constraint rejects unsupported values. */
     @Test
     void rejectsInvalidVisibility() {
         assertThatThrownBy(() -> insertEvent(insertHost(), "study", "invalid", null, "active"))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 
+    /** Verifies the status constraint rejects unsupported values. */
     @Test
     void rejectsInvalidStatus() {
         assertThatThrownBy(() -> insertEvent(insertHost(), "study", "public", null, "invalid"))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 
+    /** Verifies non-null share tokens must be unique. */
     @Test
     void rejectsDuplicateNonNullShareTokens() {
         UUID hostId = insertHost();
@@ -112,6 +121,7 @@ class EventMigrationIT {
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 
+    /** Verifies multiple events may omit their share token. */
     @Test
     void allowsMultipleEventsWithoutShareTokens() {
         UUID hostId = insertHost();
@@ -127,6 +137,7 @@ class EventMigrationIT {
         assertThat(count).isEqualTo(2);
     }
 
+    /** Verifies the location index uses the GiST access method. */
     @Test
     void locationIndexUsesGist() {
         String accessMethod = jdbc.queryForObject("""
@@ -142,6 +153,7 @@ class EventMigrationIT {
         assertThat(accessMethod).isEqualTo("gist");
     }
 
+    /** Inserts and returns a uniquely identified host fixture. */
     private UUID insertHost() {
         UUID hostId = UUID.randomUUID();
         String uniqueValue = hostId.toString();
@@ -159,6 +171,7 @@ class EventMigrationIT {
         return hostId;
     }
 
+    /** Inserts an event fixture with the supplied constraint values. */
     private UUID insertEvent(
             UUID hostId,
             String category,
