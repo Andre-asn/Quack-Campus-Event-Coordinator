@@ -20,6 +20,8 @@ repositories {
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    // Maps geography columns to JTS types. Version comes from the Boot BOM.
+    implementation 'org.hibernate.orm:hibernate-spatial'
     // Boot 4 renamed spring-boot-starter-oauth2-client to this artifact.
     implementation 'org.springframework.boot:spring-boot-starter-security-oauth2-client'
     implementation 'org.springframework.boot:spring-boot-starter-flyway'
