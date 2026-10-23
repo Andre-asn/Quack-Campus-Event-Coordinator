@@ -12,6 +12,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   Easing,
@@ -62,9 +63,45 @@ function nextRoundHour(): Date {
   return date;
 }
 
+const MAX_AHEAD_MS = 48 * 60 * 60 * 1000;
+
+// Events can start any time from now to 48 hours ahead.
+function clampStart(date: Date): Date {
+  const now = Date.now();
+  return new Date(Math.min(Math.max(date.getTime(), now), now + MAX_AHEAD_MS));
+}
+
 function formatWhen(date: Date): string {
-  const day = date.toDateString() === new Date().toDateString() ? 'Today' : 'Tomorrow';
+  const midnight = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((midnight(date) - midnight(new Date())) / 86_400_000);
+  // 48 hours can reach the day after tomorrow, which reads best by name.
+  const day = days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : date.toLocaleDateString([], { weekday: 'long' });
   return `${day}, ${date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+}
+
+// Android shows the date, then the time, as two system dialogs.
+function pickOnAndroid(current: Date, onPick: (date: Date) => void) {
+  DateTimePickerAndroid.open({
+    value: current,
+    mode: 'date',
+    minimumDate: new Date(),
+    maximumDate: new Date(Date.now() + MAX_AHEAD_MS),
+    onChange: (dateEvent, date) => {
+      if (dateEvent.type !== 'set' || !date) {
+        return;
+      }
+      DateTimePickerAndroid.open({
+        value: date,
+        mode: 'time',
+        // Android's time dialog ignores min and max, so the pick is clamped instead.
+        onChange: (timeEvent, time) => {
+          if (timeEvent.type === 'set' && time) {
+            onPick(clampStart(time));
+          }
+        },
+      });
+    },
+  });
 }
 
 type Props = {
@@ -78,7 +115,7 @@ type Props = {
 export default function CreateEventSheet({ sessionId, place, onInset, onClose, onPosted }: Props) {
   const insets = useSafeAreaInsets();
   const descriptionRef = useRef<TextInput>(null);
-  const [startsAt] = useState(nextRoundHour);
+  const [startsAt, setStartsAt] = useState(nextRoundHour);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState<Category | null>(null);
@@ -333,10 +370,32 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
             </View>
 
             <Field help="Defaults to the next hour. Up to 48 hours ahead." label="When">
-              <View accessibilityLabel={`When: ${when}`} accessible style={[styles.input, styles.inputRow]}>
-                <ClockIcon height={20} width={20} />
-                <Text style={styles.inputText}>{when}</Text>
-              </View>
+              {Platform.OS === 'ios' ? (
+                // iOS shows its own compact date and time buttons, which enforce the range.
+                <View style={[styles.input, styles.inputRow, styles.iosWhen]}>
+                  <ClockIcon height={20} width={20} />
+                  <DateTimePicker
+                    accessibilityLabel={`When: ${when}`}
+                    display="compact"
+                    maximumDate={new Date(Date.now() + MAX_AHEAD_MS)}
+                    minimumDate={new Date()}
+                    mode="datetime"
+                    onChange={(_, date) => date && setStartsAt(clampStart(date))}
+                    value={startsAt}
+                  />
+                </View>
+              ) : (
+                <Pressable
+                  accessibilityHint="Opens a date and time picker"
+                  accessibilityLabel={`When: ${when}`}
+                  accessibilityRole="button"
+                  onPress={() => pickOnAndroid(startsAt, setStartsAt)}
+                  style={({ pressed }) => [styles.input, styles.inputRow, pressed && styles.pressed]}
+                >
+                  <ClockIcon height={20} width={20} />
+                  <Text style={styles.inputText}>{when}</Text>
+                </Pressable>
+              )}
             </Field>
 
             <Field
@@ -510,6 +569,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
     gap: 8,
+  },
+  // The compact picker brings its own padded buttons.
+  iosWhen: {
+    paddingVertical: 8,
   },
   inputText: {
     color: colors.ink,
