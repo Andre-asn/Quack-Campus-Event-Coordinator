@@ -8,11 +8,14 @@ import {
   useFonts,
 } from '@expo-google-fonts/bricolage-grotesque';
 
-import CampusMap from './src/CampusMap';
+import AddIcon from './assets/create/add.svg';
+import CampusMap, { type PinnedPlace } from './src/CampusMap';
+import CreateEventSheet from './src/CreateEventSheet';
 import LoadingScreen from './src/LoadingScreen';
 import SignInScreen, { type SignInError } from './src/SignInScreen';
 import { restoreSession, signInWithGoogle, signOut } from './src/auth';
 import type { StoredSession } from './src/sessionStore';
+import { colors } from './src/theme';
 
 type Screen =
   | { status: 'loading' }
@@ -30,6 +33,9 @@ export default function App() {
 function QuackApp() {
   const insets = useSafeAreaInsets();
   const [screen, setScreen] = useState<Screen>({ status: 'loading' });
+  const [creating, setCreating] = useState(false);
+  const [sheetInset, setSheetInset] = useState(0);
+  const [pinned, setPinned] = useState<PinnedPlace | null>(null);
   const [fontsLoaded, fontError] = useFonts({
     BricolageGrotesque_600SemiBold,
     BricolageGrotesque_700Bold,
@@ -90,6 +96,12 @@ function QuackApp() {
     setScreen({ ...screen, busy: false, message: 'Could not sign out. Try again.' });
   }
 
+  function closeCreate() {
+    setCreating(false);
+    setSheetInset(0);
+    setPinned(null);
+  }
+
   // A font that fails to load falls back to the system font rather than blocking sign-in.
   if (screen.status === 'loading' || (!fontsLoaded && !fontError)) {
     return <LoadingScreen />;
@@ -101,9 +113,28 @@ function QuackApp() {
 
   return (
     <View style={styles.home}>
-      <CampusMap />
+      <CampusMap bottomInset={sheetInset} onPinMoved={creating ? setPinned : undefined} />
+      {creating ? (
+        <CreateEventSheet
+          onClose={closeCreate}
+          onInset={setSheetInset}
+          onPosted={closeCreate}
+          place={pinned}
+          sessionId={screen.session.sessionId}
+        />
+      ) : (
+        <Pressable
+          accessibilityLabel="Pin an event"
+          accessibilityRole="button"
+          onPress={() => setCreating(true)}
+          style={({ pressed }) => [styles.fab, { bottom: insets.bottom + 16 }, pressed && styles.pressed]}
+        >
+          <AddIcon height={24} width={24} />
+          <Text style={styles.fabText}>Pin an event</Text>
+        </Pressable>
+      )}
       {/* Clears the status bar, notch, or Dynamic Island while the map stays full-screen. */}
-      <View pointerEvents="box-none" style={[styles.overlay, { paddingTop: insets.top + 12 }]}>
+      <View pointerEvents="box-none" style={[styles.overlay, creating && styles.hidden, { paddingTop: insets.top + 12 }]}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`Sign out ${screen.session.user.email}`}
@@ -140,6 +171,31 @@ const styles = StyleSheet.create({
   pressed: {
     opacity: 0.85,
     transform: [{ scale: 0.97 }],
+  },
+  hidden: {
+    display: 'none',
+  },
+  fab: {
+    alignItems: 'center',
+    backgroundColor: colors.red,
+    borderRadius: 16,
+    elevation: 6,
+    flexDirection: 'row',
+    gap: 10,
+    paddingLeft: 16,
+    paddingRight: 20,
+    paddingVertical: 16,
+    position: 'absolute',
+    right: 16,
+    shadowColor: '#1F0F14',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.24,
+    shadowRadius: 12,
+  },
+  fabText: {
+    color: colors.white,
+    fontSize: 16,
+    fontWeight: '600',
   },
   chipText: {
     color: '#111',

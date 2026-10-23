@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Mapbox, { Camera, MapView, StyleImport } from '@rnmapbox/maps';
+import type { Position } from 'geojson';
 import { StatusBar } from 'expo-status-bar';
 
 import { mapboxAccessToken, stevensCenter } from './config';
@@ -28,7 +29,34 @@ function lightPresetFor(hour: number): 'dawn' | 'day' | 'dusk' | 'night' {
   return 'night';
 }
 
-export default function CampusMap() {
+export type PinnedPlace = { latitude: number; longitude: number; name: string | null };
+
+type Props = {
+  // Height of the sheet covering the bottom of the map. The map center, and so the pin, sits above it.
+  bottomInset?: number;
+  onPinMoved?: (place: PinnedPlace) => void;
+};
+
+// Reads the place name the map already draws near the pin. No geocoding service is called.
+async function placeAt(map: MapView | null, center: Position): Promise<PinnedPlace> {
+  const [longitude, latitude] = center;
+  let name: string | null = null;
+  try {
+    if (map) {
+      const [x, y] = await map.getPointInView(center);
+      const found = await map.queryRenderedFeaturesInRect([y - 40, x - 40, y + 40, x + 40], [], null);
+      // Points of interest carry a maki icon; road labels do not, so a street name is never suggested.
+      const poi = found?.features.find((f) => typeof f.properties?.name === 'string' && f.properties?.maki);
+      name = poi?.properties?.name ?? null;
+    }
+  } catch {
+    // No suggestion. The host types the label.
+  }
+  return { latitude, longitude, name };
+}
+
+export default function CampusMap({ bottomInset = 0, onPinMoved }: Props) {
+  const mapRef = useRef<MapView>(null);
   const [failed, setFailed] = useState(false);
   const [lightPreset, setLightPreset] = useState(() => lightPresetFor(new Date().getHours()));
 
@@ -49,7 +77,9 @@ export default function CampusMap() {
   return (
     <>
       <MapView
+        ref={mapRef}
         accessibilityLabel="Map of the Stevens campus"
+        onMapIdle={onPinMoved && ((state) => void placeAt(mapRef.current, state.properties.center).then(onPinMoved))}
         // Only a style failure leaves the map blank; a missing tile or sprite does not.
         onMapLoadingError={(payload) => {
           if (!payload?.type || payload.type === 'style') {
@@ -62,7 +92,10 @@ export default function CampusMap() {
       >
         <StyleImport config={{ lightPreset, show3dObjects: true }} existing id="basemap" />
         {/* Tilted so the 3D buildings read as 3D. */}
-        <Camera defaultSettings={{ centerCoordinate: stevensCenter, pitch: 45, zoomLevel: 16 }} />
+        <Camera
+          defaultSettings={{ centerCoordinate: stevensCenter, pitch: 45, zoomLevel: 16 }}
+          padding={{ paddingBottom: bottomInset }}
+        />
       </MapView>
       <StatusBar style={lightPreset === 'dusk' || lightPreset === 'night' ? 'light' : 'dark'} />
     </>

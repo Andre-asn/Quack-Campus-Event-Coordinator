@@ -1,0 +1,438 @@
+import { useRef, useState, type ReactNode } from 'react';
+import {
+  AccessibilityInfo,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import CenterPin from '../assets/create/center-pin.svg';
+import CheckIcon from '../assets/create/check.svg';
+import ClockIcon from '../assets/create/clock.svg';
+import CloseIcon from '../assets/create/close.svg';
+import PinShadow from '../assets/create/pin-shadow.svg';
+import PlaceIcon from '../assets/create/place.svg';
+import type { PinnedPlace } from './CampusMap';
+import { createEvent } from './events';
+import { colors, fonts } from './theme';
+
+const categories = ['study', 'food', 'sports', 'games', 'movie', 'music', 'other'] as const;
+type Category = (typeof categories)[number];
+type FieldName = 'title' | 'description' | 'label';
+
+// 7:05 PM becomes 8:00 PM; 11:30 PM becomes midnight tomorrow.
+function nextRoundHour(): Date {
+  const date = new Date();
+  date.setHours(date.getHours() + 1, 0, 0, 0);
+  return date;
+}
+
+function formatWhen(date: Date): string {
+  const day = date.toDateString() === new Date().toDateString() ? 'Today' : 'Tomorrow';
+  return `${day}, ${date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+}
+
+type Props = {
+  sessionId: string;
+  place: PinnedPlace | null;
+  onInset: (height: number) => void;
+  onClose: () => void;
+  onPosted: () => void;
+};
+
+export default function CreateEventSheet({ sessionId, place, onInset, onClose, onPosted }: Props) {
+  const insets = useSafeAreaInsets();
+  const descriptionRef = useRef<TextInput>(null);
+  const [startsAt] = useState(nextRoundHour);
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [category, setCategory] = useState<Category | null>(null);
+  // null until the host types, so the label keeps following the map as the pin moves.
+  const [typedLabel, setTypedLabel] = useState<string | null>(null);
+  const [focused, setFocused] = useState<FieldName | null>(null);
+  const [sheetHeight, setSheetHeight] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const suggestedLabel = place?.name ?? '';
+  const label = typedLabel ?? suggestedLabel;
+  const ready = Boolean(title.trim() && description.trim() && category && label.trim() && place) && !busy;
+  const when = formatWhen(startsAt);
+
+  async function post() {
+    if (!place || !category) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    const outcome = await createEvent(sessionId, {
+      title: title.trim(),
+      description: description.trim(),
+      category,
+      latitude: place.latitude,
+      longitude: place.longitude,
+      locationLabel: label.trim(),
+      startsAt: startsAt.toISOString(),
+    });
+    if (outcome.ok) {
+      AccessibilityInfo.announceForAccessibility('Event posted');
+      onPosted();
+      return;
+    }
+    setBusy(false);
+    setError(outcome.message);
+  }
+
+  function inputProps(name: FieldName) {
+    return {
+      onBlur: () => setFocused(null),
+      onFocus: () => setFocused(name),
+      placeholderTextColor: colors.muted,
+      style: [styles.input, focused === name && styles.inputFocused],
+    };
+  }
+
+  return (
+    <>
+      <View pointerEvents="none" style={[styles.hintRow, { top: insets.top + 16 }]}>
+        <Text style={styles.hint}>Move the map to place your pin</Text>
+      </View>
+      {sheetHeight > 0 ? (
+        // The pin's tip sits on the map center, which the camera keeps above the sheet.
+        <View pointerEvents="none" style={[styles.pinArea, { bottom: sheetHeight }]}>
+          <View style={styles.pin}>
+            <CenterPin height={52} width={40} />
+            <PinShadow height={6} style={styles.pinShadow} width={18} />
+          </View>
+        </View>
+      ) : null}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        pointerEvents="box-none"
+        style={styles.keyboard}
+      >
+        <View
+          onLayout={(event) => {
+            // Measured once, so typing never moves the map under the pin.
+            if (!sheetHeight) {
+              setSheetHeight(event.nativeEvent.layout.height);
+              onInset(event.nativeEvent.layout.height);
+            }
+          }}
+          style={[styles.sheet, { paddingBottom: insets.bottom + 16 }]}
+        >
+          <View style={styles.handle} />
+          <View style={styles.heading}>
+            <Text accessibilityRole="header" style={styles.headingText}>
+              Pin an event
+            </Text>
+            <Pressable
+              accessibilityLabel="Close"
+              accessibilityRole="button"
+              hitSlop={4}
+              onPress={onClose}
+              style={({ pressed }) => [styles.close, pressed && styles.pressed]}
+            >
+              <CloseIcon height={20} width={20} />
+            </Pressable>
+          </View>
+
+          <ScrollView contentContainerStyle={styles.fields} keyboardShouldPersistTaps="handled">
+            <Field label="Title">
+              <TextInput
+                {...inputProps('title')}
+                accessibilityLabel="Title"
+                blurOnSubmit={false}
+                onChangeText={setTitle}
+                onSubmitEditing={() => descriptionRef.current?.focus()}
+                placeholder="Study session"
+                returnKeyType="next"
+                value={title}
+              />
+            </Field>
+
+            <Field help="One line. Nearby students see it on the map." label="What’s happening?" trailing={`${description.length}/140`}>
+              <TextInput
+                {...inputProps('description')}
+                accessibilityHint="One line, up to 140 characters"
+                accessibilityLabel="What’s happening?"
+                maxLength={140}
+                onChangeText={setDescription}
+                placeholder="Studying for CS102!"
+                ref={descriptionRef}
+                value={description}
+              />
+            </Field>
+
+            <View style={styles.field}>
+              <Text style={styles.label}>Category</Text>
+              <View accessibilityLabel="Category" accessibilityRole="radiogroup" style={styles.chips}>
+                {categories.map((name) => {
+                  const selected = category === name;
+                  const text = name[0].toUpperCase() + name.slice(1);
+                  return (
+                    <Pressable
+                      accessibilityLabel={text}
+                      accessibilityRole="radio"
+                      accessibilityState={{ checked: selected }}
+                      key={name}
+                      onPress={() => setCategory(name)}
+                      style={({ pressed }) => [styles.chip, selected && styles.chipSelected, pressed && styles.pressed]}
+                    >
+                      {selected ? <CheckIcon height={18} width={18} /> : null}
+                      <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{text}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
+            <Field help="Defaults to the next hour. Up to 48 hours ahead." label="When">
+              <View accessibilityLabel={`When: ${when}`} accessible style={[styles.input, styles.inputRow]}>
+                <ClockIcon height={20} width={20} />
+                <Text style={styles.inputText}>{when}</Text>
+              </View>
+            </Field>
+
+            <Field
+              help={typedLabel === null && suggestedLabel
+                ? 'Filled in from the map. Add a room or floor if it helps.'
+                : 'Type a room or landmark so people can find you.'}
+              label="Where exactly?"
+            >
+              <View style={[styles.input, styles.inputRow, focused === 'label' && styles.inputFocused]}>
+                <PlaceIcon height={20} width={20} />
+                <TextInput
+                  {...inputProps('label')}
+                  accessibilityLabel="Where exactly?"
+                  onChangeText={setTypedLabel}
+                  placeholder="Library, 3rd floor"
+                  style={styles.inputText}
+                  value={label}
+                />
+              </View>
+            </Field>
+          </ScrollView>
+
+          {error ? (
+            <Text accessibilityLiveRegion="polite" accessibilityRole="alert" style={styles.error}>
+              {error}
+            </Text>
+          ) : null}
+          <Pressable
+            accessibilityLabel="Post event"
+            accessibilityRole="button"
+            accessibilityState={{ busy, disabled: !ready }}
+            disabled={!ready}
+            onPress={() => void post()}
+            style={({ pressed }) => [styles.post, !ready && styles.postDisabled, pressed && styles.pressed]}
+          >
+            <Text style={styles.postText}>{busy ? 'Posting...' : 'Post event'}</Text>
+          </Pressable>
+        </View>
+      </KeyboardAvoidingView>
+    </>
+  );
+}
+
+function Field({ label, help, trailing, children }: { label: string; help?: string; trailing?: string; children: ReactNode }) {
+  return (
+    <View style={styles.field}>
+      <Text style={styles.label}>{label}</Text>
+      {children}
+      {help ? (
+        <View style={styles.helpRow}>
+          <Text style={[styles.help, styles.helpText]}>{help}</Text>
+          {trailing ? <Text style={styles.help}>{trailing}</Text> : null}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  hintRow: {
+    alignItems: 'center',
+    left: 0,
+    position: 'absolute',
+    right: 0,
+  },
+  hint: {
+    backgroundColor: colors.ink,
+    borderRadius: 16,
+    color: colors.white,
+    fontSize: 13,
+    fontWeight: '500',
+    overflow: 'hidden',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  pinArea: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+  },
+  // Twice the pin's height, so the tip lands on the center line.
+  pin: {
+    alignItems: 'center',
+    height: 104,
+  },
+  pinShadow: {
+    marginTop: -4,
+  },
+  keyboard: {
+    ...StyleSheet.absoluteFill,
+    justifyContent: 'flex-end',
+  },
+  sheet: {
+    backgroundColor: colors.paper,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    elevation: 12,
+    gap: 14,
+    maxHeight: '78%',
+    paddingHorizontal: 24,
+    paddingTop: 8,
+    shadowColor: '#1F0F14',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+  },
+  handle: {
+    alignSelf: 'center',
+    backgroundColor: colors.inputLine,
+    borderRadius: 2,
+    height: 4,
+    marginVertical: 4,
+    width: 32,
+  },
+  heading: {
+    alignItems: 'center',
+    flexDirection: 'row',
+  },
+  headingText: {
+    color: colors.ink,
+    flex: 1,
+    fontFamily: fonts.displayBold,
+    fontSize: 24,
+    letterSpacing: -0.48,
+  },
+  close: {
+    alignItems: 'center',
+    backgroundColor: colors.sand,
+    borderRadius: 24,
+    height: 44,
+    justifyContent: 'center',
+    width: 44,
+  },
+  fields: {
+    gap: 14,
+  },
+  field: {
+    gap: 6,
+  },
+  label: {
+    color: colors.muted,
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  input: {
+    backgroundColor: colors.white,
+    borderColor: colors.inputLine,
+    borderRadius: 12,
+    borderWidth: 1,
+    color: colors.ink,
+    fontSize: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  inputFocused: {
+    borderColor: colors.red,
+    borderWidth: 2,
+    // Keeps the text still when the border thickens.
+    paddingHorizontal: 15,
+    paddingVertical: 13,
+  },
+  inputRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  inputText: {
+    color: colors.ink,
+    flex: 1,
+    fontSize: 16,
+    padding: 0,
+  },
+  helpRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  help: {
+    color: colors.muted,
+    fontSize: 12,
+  },
+  helpText: {
+    flex: 1,
+  },
+  chips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  chip: {
+    alignItems: 'center',
+    borderColor: colors.line,
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 6,
+    minHeight: 36,
+    paddingHorizontal: 12,
+  },
+  chipSelected: {
+    backgroundColor: colors.redTint,
+    borderColor: colors.redTint,
+    paddingLeft: 8,
+  },
+  chipText: {
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  chipTextSelected: {
+    color: colors.redDeep,
+  },
+  error: {
+    color: colors.red,
+    fontSize: 14,
+  },
+  post: {
+    alignItems: 'center',
+    backgroundColor: colors.red,
+    borderRadius: 28,
+    minHeight: 52,
+    justifyContent: 'center',
+  },
+  postDisabled: {
+    opacity: 0.5,
+  },
+  postText: {
+    color: colors.white,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  pressed: {
+    opacity: 0.85,
+    transform: [{ scale: 0.97 }],
+  },
+});
