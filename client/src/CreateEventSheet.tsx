@@ -15,6 +15,8 @@ import {
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   Easing,
+  Extrapolation,
+  interpolate,
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
@@ -156,6 +158,10 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
     opacity: opacity.get(),
     transform: [{ translateY: offset.get() }],
   }));
+  // The hint is for placing the pin, so it shows only while the map is uncovered.
+  const hintStyle = useAnimatedStyle(() => ({
+    opacity: peekY > 0 ? interpolate(offset.get(), [0, peekY], [0, 1], Extrapolation.CLAMP) : 1,
+  }));
   // The pin rides at the middle of the visible map, so it moves half as far as the sheet.
   const pinStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: Math.min(offset.get(), sheetHeight) / 2 }],
@@ -201,9 +207,14 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
 
   return (
     <>
-      <View pointerEvents="none" style={[styles.hintRow, { top: insets.top + 16 }]}>
+      <Animated.View
+        accessibilityElementsHidden={!collapsed}
+        importantForAccessibility={collapsed ? 'auto' : 'no-hide-descendants'}
+        pointerEvents="none"
+        style={[styles.hintRow, { top: insets.top + 16 }, hintStyle]}
+      >
         <Text style={styles.hint}>Move the map to place your pin</Text>
-      </View>
+      </Animated.View>
       {sheetHeight > 0 ? (
         // The pin's tip sits on the map center, which the camera keeps above the sheet.
         <View pointerEvents="none" style={[styles.pinArea, { bottom: sheetHeight }]}>
