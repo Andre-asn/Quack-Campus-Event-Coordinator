@@ -86,19 +86,13 @@ function pickOnAndroid(current: Date, onPick: (date: Date) => void) {
     mode: 'date',
     minimumDate: new Date(),
     maximumDate: new Date(Date.now() + MAX_AHEAD_MS),
-    onChange: (dateEvent, date) => {
-      if (dateEvent.type !== 'set' || !date) {
-        return;
-      }
+    // Cancelling either dialog keeps the current time, so there is no onDismiss.
+    onValueChange: (_, date) => {
       DateTimePickerAndroid.open({
         value: date,
         mode: 'time',
         // Android's time dialog ignores min and max, so the pick is clamped instead.
-        onChange: (timeEvent, time) => {
-          if (timeEvent.type === 'set' && time) {
-            onPick(clampStart(time));
-          }
-        },
+        onValueChange: (__, time) => onPick(clampStart(time)),
       });
     },
   });
@@ -380,7 +374,7 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
                     maximumDate={new Date(Date.now() + MAX_AHEAD_MS)}
                     minimumDate={new Date()}
                     mode="datetime"
-                    onChange={(_, date) => date && setStartsAt(clampStart(date))}
+                    onValueChange={(_, date) => setStartsAt(clampStart(date))}
                     value={startsAt}
                   />
                 </View>
