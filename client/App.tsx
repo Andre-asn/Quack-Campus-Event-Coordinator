@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   BricolageGrotesque_600SemiBold,
@@ -24,9 +25,11 @@ type Screen =
 
 export default function App() {
   return (
-    <SafeAreaProvider>
-      <QuackApp />
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={styles.home}>
+      <SafeAreaProvider>
+        <QuackApp />
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 

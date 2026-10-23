@@ -1,6 +1,7 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   AccessibilityInfo,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -9,8 +10,19 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { scheduleOnRN } from 'react-native-worklets';
 
 import CenterPin from '../assets/create/center-pin.svg';
 import CheckIcon from '../assets/create/check.svg';
@@ -25,6 +37,21 @@ import { colors, fonts } from './theme';
 const categories = ['study', 'food', 'sports', 'games', 'movie', 'music', 'other'] as const;
 type Category = (typeof categories)[number];
 type FieldName = 'title' | 'description' | 'label';
+
+const EASE_OUT = Easing.bezier(0.23, 1, 0.32, 1);
+const SHEET_SPRING = { duration: 300, dampingRatio: 0.8 };
+
+// Where a flick would come to rest, so a quick short swipe still snaps.
+function project(velocity: number) {
+  'worklet';
+  return ((velocity / 1000) * 0.998) / (1 - 0.998);
+}
+
+// The further past an edge, the less the sheet follows.
+function rubberband(overshoot: number, dimension: number) {
+  'worklet';
+  return (overshoot * dimension * 0.55) / (dimension + 0.55 * Math.abs(overshoot));
+}
 
 // 7:05 PM becomes 8:00 PM; 11:30 PM becomes midnight tomorrow.
 function nextRoundHour(): Date {
@@ -57,8 +84,82 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
   const [typedLabel, setTypedLabel] = useState<string | null>(null);
   const [focused, setFocused] = useState<FieldName | null>(null);
   const [sheetHeight, setSheetHeight] = useState(0);
+  const [peekHeight, setPeekHeight] = useState(0);
+  const [collapsed, setCollapsed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const reduced = useReducedMotion();
+  const { height: windowHeight } = useWindowDimensions();
+  // How far the sheet sits below its open position: 0 open, peekY collapsed, sheetHeight gone.
+  const offset = useSharedValue(windowHeight);
+  const opacity = useSharedValue(reduced ? 0 : 1);
+  const dragStart = useSharedValue(0);
+  const peekY = sheetHeight - peekHeight;
+
+  // Runs when the sheet comes to rest, so the map re-centers the pin once, not every frame.
+  function settle(toCollapsed: boolean) {
+    setCollapsed(toCollapsed);
+    onInset(toCollapsed ? peekHeight : sheetHeight);
+    if (toCollapsed) {
+      Keyboard.dismiss();
+    }
+  }
+
+  function snapTo(toCollapsed: boolean) {
+    offset.set(withSpring(toCollapsed ? peekY : 0, SHEET_SPRING));
+    settle(toCollapsed);
+  }
+
+  // Exit is quicker than entry: the host is done with the sheet.
+  function leave(then: () => void) {
+    const done = (finished?: boolean) => {
+      'worklet';
+      if (finished) {
+        scheduleOnRN(then);
+      }
+    };
+    if (reduced) {
+      opacity.set(withTiming(0, { duration: 150 }, done));
+    } else {
+      offset.set(withTiming(sheetHeight, { duration: 200, easing: EASE_OUT }, done));
+    }
+  }
+
+  const drag = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetY([-10, 10])
+        .onStart(() => {
+          dragStart.set(offset.get());
+        })
+        .onUpdate((event) => {
+          const next = dragStart.get() + event.translationY;
+          if (next < 0) {
+            offset.set(rubberband(next, sheetHeight));
+          } else if (next > peekY) {
+            offset.set(peekY + rubberband(next - peekY, sheetHeight));
+          } else {
+            offset.set(next);
+          }
+        })
+        .onEnd((event) => {
+          const toCollapsed = offset.get() + project(event.velocityY) > peekY / 2;
+          offset.set(withSpring(toCollapsed ? peekY : 0, { ...SHEET_SPRING, velocity: event.velocityY }));
+          scheduleOnRN(settle, toCollapsed);
+        }),
+    // settle reads the measured heights, which change only on first layout.
+    [peekY, sheetHeight],
+  );
+
+  const sheetStyle = useAnimatedStyle(() => ({
+    opacity: opacity.get(),
+    transform: [{ translateY: offset.get() }],
+  }));
+  // The pin rides at the middle of the visible map, so it moves half as far as the sheet.
+  const pinStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: Math.min(offset.get(), sheetHeight) / 2 }],
+  }));
 
   const suggestedLabel = place?.name ?? '';
   const label = typedLabel ?? suggestedLabel;
@@ -82,7 +183,7 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
     });
     if (outcome.ok) {
       AccessibilityInfo.announceForAccessibility('Event posted');
-      onPosted();
+      leave(onPosted);
       return;
     }
     setBusy(false);
@@ -106,10 +207,10 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
       {sheetHeight > 0 ? (
         // The pin's tip sits on the map center, which the camera keeps above the sheet.
         <View pointerEvents="none" style={[styles.pinArea, { bottom: sheetHeight }]}>
-          <View style={styles.pin}>
+          <Animated.View style={[styles.pin, pinStyle]}>
             <CenterPin height={52} width={40} />
             <PinShadow height={6} style={styles.pinShadow} width={18} />
-          </View>
+          </Animated.View>
         </View>
       ) : null}
       <KeyboardAvoidingView
@@ -117,31 +218,58 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
         pointerEvents="box-none"
         style={styles.keyboard}
       >
-        <View
+        <Animated.View
           onLayout={(event) => {
             // Measured once, so typing never moves the map under the pin.
             if (!sheetHeight) {
-              setSheetHeight(event.nativeEvent.layout.height);
-              onInset(event.nativeEvent.layout.height);
+              const height = event.nativeEvent.layout.height;
+              setSheetHeight(height);
+              onInset(height);
+              if (reduced) {
+                offset.set(0);
+                opacity.set(withTiming(1, { duration: 200 }));
+              } else {
+                offset.set(height);
+                offset.set(withSpring(0, { duration: 300, dampingRatio: 1 }));
+              }
             }
           }}
-          style={[styles.sheet, { paddingBottom: insets.bottom + 16 }]}
+          style={[styles.sheet, { paddingBottom: insets.bottom + 16 }, sheetStyle]}
         >
-          <View style={styles.handle} />
-          <View style={styles.heading}>
-            <Text accessibilityRole="header" style={styles.headingText}>
-              Pin an event
-            </Text>
-            <Pressable
-              accessibilityLabel="Close"
-              accessibilityRole="button"
-              hitSlop={4}
-              onPress={onClose}
-              style={({ pressed }) => [styles.close, pressed && styles.pressed]}
+          <GestureDetector gesture={drag}>
+            <View
+              onLayout={(event) => {
+                const { y, height } = event.nativeEvent.layout;
+                // Collapsed, only the handle and heading stay above the home indicator.
+                setPeekHeight(y + height + 12 + insets.bottom);
+              }}
+              style={styles.grab}
             >
-              <CloseIcon height={20} width={20} />
-            </Pressable>
-          </View>
+              <Pressable
+                accessibilityLabel={collapsed ? 'Expand sheet' : 'Collapse sheet'}
+                accessibilityRole="button"
+                hitSlop={{ top: 12, bottom: 12, left: 40, right: 40 }}
+                onPress={() => snapTo(!collapsed)}
+                style={styles.handleTarget}
+              >
+                <View style={styles.handle} />
+              </Pressable>
+              <View style={styles.heading}>
+                <Text accessibilityRole="header" style={styles.headingText}>
+                  Pin an event
+                </Text>
+                <Pressable
+                  accessibilityLabel="Close"
+                  accessibilityRole="button"
+                  hitSlop={4}
+                  onPress={() => leave(onClose)}
+                  style={({ pressed }) => [styles.close, pressed && styles.pressed]}
+                >
+                  <CloseIcon height={20} width={20} />
+                </Pressable>
+              </View>
+            </View>
+          </GestureDetector>
 
           <ScrollView contentContainerStyle={styles.fields} keyboardShouldPersistTaps="handled">
             <Field label="Title">
@@ -235,7 +363,7 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
           >
             <Text style={styles.postText}>{busy ? 'Posting...' : 'Post event'}</Text>
           </Pressable>
-        </View>
+        </Animated.View>
       </KeyboardAvoidingView>
     </>
   );
@@ -307,12 +435,17 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.12,
     shadowRadius: 16,
   },
-  handle: {
+  grab: {
+    gap: 14,
+  },
+  handleTarget: {
     alignSelf: 'center',
+    paddingVertical: 4,
+  },
+  handle: {
     backgroundColor: colors.inputLine,
     borderRadius: 2,
     height: 4,
-    marginVertical: 4,
     width: 32,
   },
   heading: {

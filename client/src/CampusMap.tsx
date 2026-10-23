@@ -107,6 +107,8 @@ export default function CampusMap({ bottomInset = 0, onPinMoved }: Props) {
         </VectorSource>
         {/* Tilted so the 3D buildings read as 3D. */}
         <Camera
+          // Matches the sheet, so the map re-centers under the pin as the sheet settles.
+          animationDuration={300}
           defaultSettings={{ centerCoordinate: stevensCenter, pitch: 45, zoomLevel: 16 }}
           padding={{ paddingBottom: bottomInset }}
         />
