@@ -28,7 +28,8 @@
     },
     "plugins": [
       "expo-font",
-      "@rnmapbox/maps"
+      "@rnmapbox/maps",
+      "@react-native-community/datetimepicker"
     ],
     "extra": {
       "eas": {
