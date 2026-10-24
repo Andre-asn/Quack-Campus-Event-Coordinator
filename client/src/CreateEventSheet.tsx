@@ -207,6 +207,13 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
     if (!place || !category) {
       return;
     }
+    // The window moves while the sheet is open, so show the corrected time before posting it.
+    const allowedStart = clampStart(startsAt);
+    if (allowedStart.getTime() !== startsAt.getTime()) {
+      setStartsAt(allowedStart);
+      setError('Start time was updated to fit the next 48 hours. Review it before posting.');
+      return;
+    }
     setBusy(true);
     setError(null);
     const outcome = await createEvent(sessionId, {

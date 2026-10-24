@@ -68,6 +68,8 @@ async function placeAt(map: MapView | null, center: Position): Promise<PinnedPla
 
 export default function CampusMap({ bottomInset = 0, onPinMoved }: Props) {
   const mapRef = useRef<MapView>(null);
+  // Lookups can finish out of order; only the newest may move the pin.
+  const latestLookup = useRef(0);
   const [failed, setFailed] = useState(false);
   const [lightPreset, setLightPreset] = useState(() => lightPresetFor(new Date().getHours()));
 
@@ -90,7 +92,14 @@ export default function CampusMap({ bottomInset = 0, onPinMoved }: Props) {
       <MapView
         ref={mapRef}
         accessibilityLabel="Map of the Stevens campus"
-        onMapIdle={onPinMoved && ((state) => void placeAt(mapRef.current, state.properties.center).then(onPinMoved))}
+        onMapIdle={onPinMoved && ((state) => {
+          const lookup = ++latestLookup.current;
+          void placeAt(mapRef.current, state.properties.center).then((place) => {
+            if (lookup === latestLookup.current) {
+              onPinMoved(place);
+            }
+          });
+        })}
         // Only a style failure leaves the map blank; a missing tile or sprite does not.
         onMapLoadingError={(payload) => {
           if (!payload?.type || payload.type === 'style') {
