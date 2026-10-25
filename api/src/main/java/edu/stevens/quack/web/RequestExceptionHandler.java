@@ -8,6 +8,8 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import edu.stevens.quack.event.MapQueryException;
+
 @RestControllerAdvice
 public class RequestExceptionHandler {
 
@@ -18,6 +20,16 @@ public class RequestExceptionHandler {
                 "MALFORMED_REQUEST",
                 "Malformed request",
                 "The request body is not valid JSON for this endpoint.");
+        return ResponseEntity.status(problem.getStatus())
+                .contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                .body(problem);
+    }
+
+    @ExceptionHandler(MapQueryException.class)
+    ResponseEntity<ProblemDetail> mapQuery(MapQueryException ex) {
+        HttpStatus status = ex.status();
+        String title = status == HttpStatus.BAD_REQUEST ? "Malformed request" : "Invalid map query";
+        ProblemDetail problem = ApiProblems.of(status, ex.code(), title, ex.getMessage());
         return ResponseEntity.status(problem.getStatus())
                 .contentType(MediaType.APPLICATION_PROBLEM_JSON)
                 .body(problem);

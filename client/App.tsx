@@ -101,7 +101,7 @@ function QuackApp() {
 
   return (
     <View style={styles.home}>
-      <CampusMap />
+      <CampusMap sessionId={screen.session.sessionId} />
       {/* Clears the status bar, notch, or Dynamic Island while the map stays full-screen. */}
       <View pointerEvents="box-none" style={[styles.overlay, { paddingTop: insets.top + 12 }]}>
         <Pressable
