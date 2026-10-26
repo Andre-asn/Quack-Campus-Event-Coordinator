@@ -5,6 +5,7 @@ import type { Position } from 'geojson';
 import { StatusBar } from 'expo-status-bar';
 
 import { mapboxAccessToken, stevensCenter } from './config';
+import { campusDayKey } from './campusTime';
 import { groupBySpot, loadMapEvents, type MapEvent, type Spot } from './mapEvents';
 
 if (mapboxAccessToken) {
@@ -34,6 +35,7 @@ export type PinnedPlace = { latitude: number; longitude: number; name: string | 
 
 type Props = {
   sessionId: string;
+  refreshKey?: number;
   // Height of the sheet covering the bottom of the map. The map center, and so the pin, sits above it.
   bottomInset?: number;
   onPinMoved?: (place: PinnedPlace) => void;
@@ -68,12 +70,13 @@ async function placeAt(map: MapView | null, center: Position): Promise<PinnedPla
   return { latitude, longitude, name };
 }
 
-export default function CampusMap({ sessionId, bottomInset = 0, onPinMoved }: Props) {
+export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, onPinMoved }: Props) {
   const mapRef = useRef<MapView>(null);
   // Lookups can finish out of order; only the newest may move the pin.
   const latestLookup = useRef(0);
   const [failed, setFailed] = useState(false);
   const [lightPreset, setLightPreset] = useState(() => lightPresetFor(new Date().getHours()));
+  const [day, setDay] = useState(() => campusDayKey(new Date()));
   const [bbox, setBbox] = useState<string | null>(null);
   const [events, setEvents] = useState<MapEvent[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -83,7 +86,11 @@ export default function CampusMap({ sessionId, bottomInset = 0, onPinMoved }: Pr
 
   // Keep the lighting in step with the clock while the app stays open.
   useEffect(() => {
-    const timer = setInterval(() => setLightPreset(lightPresetFor(new Date().getHours())), 60_000);
+    const timer = setInterval(() => {
+      const now = new Date();
+      setLightPreset(lightPresetFor(now.getHours()));
+      setDay(campusDayKey(now));
+    }, 60_000);
     return () => clearInterval(timer);
   }, []);
 
@@ -120,7 +127,7 @@ export default function CampusMap({ sessionId, bottomInset = 0, onPinMoved }: Pr
     return () => {
       cancelled = true;
     };
-  }, [bbox, sessionId]);
+  }, [bbox, day, refreshKey, sessionId]);
 
   function scheduleQuery(
     event: { properties: { bounds: { ne: readonly number[]; sw: readonly number[] } } },
@@ -217,7 +224,14 @@ function SpotBubble({ spot, onShowAll }: { spot: Spot; onShowAll: () => void }) 
   return (
     <View style={styles.bubbles}>
       {visible.map((event, index) => (
-        <Avatar event={event} key={event.id} overlap={index > 0} />
+        <Pressable
+          accessibilityLabel={event.title}
+          accessibilityRole="button"
+          key={event.id}
+          onPress={onShowAll}
+        >
+          <Avatar event={event} overlap={index > 0} />
+        </Pressable>
       ))}
       {overflow ? (
         <Pressable

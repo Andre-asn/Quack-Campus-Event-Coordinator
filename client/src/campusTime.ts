@@ -1,5 +1,10 @@
 const CAMPUS = 'America/New_York';
 
+export function campusDayKey(now: Date): string {
+  const day = campusDate(now);
+  return `${day.year}-${day.month}-${day.day}`;
+}
+
 export function campusDayRange(now: Date): { from: string; to: string } {
   const today = campusDate(now);
   const tomorrow = addDays(today, 1);

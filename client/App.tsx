@@ -39,6 +39,7 @@ function QuackApp() {
   const [creating, setCreating] = useState(false);
   const [sheetInset, setSheetInset] = useState(0);
   const [pinned, setPinned] = useState<PinnedPlace | null>(null);
+  const [mapRefresh, setMapRefresh] = useState(0);
   const [fontsLoaded, fontError] = useFonts({
     BricolageGrotesque_600SemiBold,
     BricolageGrotesque_700Bold,
@@ -119,13 +120,17 @@ function QuackApp() {
       <CampusMap
         bottomInset={sheetInset}
         onPinMoved={creating ? setPinned : undefined}
+        refreshKey={mapRefresh}
         sessionId={screen.session.sessionId}
       />
       {creating ? (
         <CreateEventSheet
           onClose={closeCreate}
           onInset={setSheetInset}
-          onPosted={closeCreate}
+          onPosted={() => {
+            closeCreate();
+            setMapRefresh((value) => value + 1);
+          }}
           place={pinned}
           sessionId={screen.session.sessionId}
         />

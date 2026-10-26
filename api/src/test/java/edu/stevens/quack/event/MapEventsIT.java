@@ -88,6 +88,19 @@ class MapEventsIT extends PostgresIntegrationTest {
     }
 
     @Test
+    void returnsAnEmptyPageWhenTheViewportHasNoEvents() {
+        User host = host("ada");
+        save(host, "Outside", 40.751, -74.025, noonToday());
+
+        client.get().uri(mapUri(BBOX, startOfToday(), startOfTomorrow(), 50, null))
+                .header(HttpHeaders.COOKIE, "JSESSIONID=" + sessionFor(host))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.events.length()").isEqualTo(0);
+    }
+
+    @Test
     void excludesLinkOnlyEventsEvenForTheHost() {
         User host = host("ada");
         Instant today = noonToday();
@@ -166,6 +179,13 @@ class MapEventsIT extends PostgresIntegrationTest {
         client.get().uri(uri)
                 .header(HttpHeaders.COOKIE, "JSESSIONID=" + sessionFor(host))
                 .header(HttpHeaders.IF_NONE_MATCH, etag)
+                .exchange()
+                .expectStatus().isNotModified()
+                .expectBody().isEmpty();
+
+        client.get().uri(uri)
+                .header(HttpHeaders.COOKIE, "JSESSIONID=" + sessionFor(host))
+                .header(HttpHeaders.IF_NONE_MATCH, "*")
                 .exchange()
                 .expectStatus().isNotModified()
                 .expectBody().isEmpty();

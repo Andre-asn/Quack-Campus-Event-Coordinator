@@ -56,7 +56,8 @@ public class EventController {
             return false;
         }
         for (String candidate : ifNoneMatch.split(",")) {
-            if (strip(candidate).equals(etag)) {
+            String token = strip(candidate);
+            if (token.equals("*") || token.equals(etag)) {
                 return true;
             }
         }

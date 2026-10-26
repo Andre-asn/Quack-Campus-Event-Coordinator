@@ -156,6 +156,11 @@ public class EventService {
         }
     }
 
+    private static void field(MessageDigest digest, String value) {
+        digest.update(value.getBytes(StandardCharsets.UTF_8));
+        digest.update((byte) 0);
+    }
+
     private static MapQueryException malformed(String detail) {
         return new MapQueryException(HttpStatus.BAD_REQUEST, "MALFORMED_REQUEST", detail);
     }
@@ -164,14 +169,16 @@ public class EventService {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             for (MapEventPage.MapPin pin : page.events()) {
-                digest.update(pin.id().toString().getBytes(StandardCharsets.UTF_8));
-                digest.update(pin.startsAt().toString().getBytes(StandardCharsets.UTF_8));
-                digest.update(pin.host().displayName().getBytes(StandardCharsets.UTF_8));
-                digest.update(String.valueOf(pin.host().avatarUrl()).getBytes(StandardCharsets.UTF_8));
-                digest.update(Double.toString(pin.latitude()).getBytes(StandardCharsets.UTF_8));
-                digest.update(Double.toString(pin.longitude()).getBytes(StandardCharsets.UTF_8));
+                field(digest, pin.id().toString());
+                field(digest, pin.title());
+                field(digest, pin.category());
+                field(digest, pin.startsAt().toString());
+                field(digest, pin.host().displayName());
+                field(digest, String.valueOf(pin.host().avatarUrl()));
+                field(digest, Double.toString(pin.latitude()));
+                field(digest, Double.toString(pin.longitude()));
             }
-            digest.update(String.valueOf(page.nextCursor()).getBytes(StandardCharsets.UTF_8));
+            field(digest, String.valueOf(page.nextCursor()));
             return HexFormat.of().formatHex(digest.digest());
         } catch (NoSuchAlgorithmException ex) {
             throw new IllegalStateException(ex);

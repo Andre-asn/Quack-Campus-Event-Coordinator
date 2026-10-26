@@ -25,7 +25,7 @@ export type Spot = {
   events: MapEvent[];
 };
 
-const etags = new Map<string, string>();
+let cached: { url: string; etag: string; events: MapEvent[] } | null = null;
 
 export function groupBySpot(events: MapEvent[]): Spot[] {
   const groups = new Map<string, MapEvent[]>();
@@ -52,21 +52,17 @@ export async function loadMapEvents(
     Accept: 'application/json',
     Cookie: `${sessionCookieName}=${sessionId}`,
   };
-  const etag = etags.get(url);
-  if (etag) {
-    headers['If-None-Match'] = etag;
+  if (cached?.url === url) {
+    headers['If-None-Match'] = cached.etag;
   }
   const response = await fetch(url, { headers });
-  if (response.status === 304) {
-    return { events: [], unchanged: true };
+  if (response.status === 304 && cached?.url === url) {
+    return { events: cached.events, unchanged: false };
   }
   if (!response.ok) {
     throw new Error(`Map query failed (${response.status})`);
   }
   const nextEtag = response.headers.get('ETag');
-  if (nextEtag) {
-    etags.set(url, nextEtag);
-  }
   const page = (await response.json()) as MapEventPage;
   const events = [...(page.events ?? [])];
   let cursor = page.nextCursor;
@@ -81,5 +77,6 @@ export async function loadMapEvents(
     events.push(...(nextPage.events ?? []));
     cursor = nextPage.nextCursor;
   }
+  cached = nextEtag && !page.nextCursor ? { url, etag: nextEtag, events } : null;
   return { events, unchanged: false };
 }
