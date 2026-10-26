@@ -35,9 +35,9 @@ function addDays(day: CalendarDay, days: number): CalendarDay {
 }
 
 function campusMidnight(day: CalendarDay): Date {
-  const guess = new Date(Date.UTC(day.year, day.month - 1, day.day, 12, 0, 0));
-  const offset = timeZoneOffsetMs(guess, CAMPUS);
-  return new Date(Date.UTC(day.year, day.month - 1, day.day, 0, 0, 0) - offset);
+  const utcMidnight = new Date(Date.UTC(day.year, day.month - 1, day.day, 0, 0, 0));
+  const offset = timeZoneOffsetMs(utcMidnight, CAMPUS);
+  return new Date(utcMidnight.getTime() - offset);
 }
 
 function timeZoneOffsetMs(date: Date, timeZone: string): number {
