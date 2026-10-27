@@ -110,14 +110,14 @@ export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, 
     let cancelled = false;
     setEvents([]);
     setLoaded(false);
+    setLoadError(false);
+    setShowAll(null);
     void loadMapEvents(sessionId, bbox)
       .then((result) => {
         if (cancelled) {
           return;
         }
-        if (!result.unchanged) {
-          setEvents(result.events);
-        }
+        setEvents(result.events);
         setLoaded(true);
         setLoadError(false);
       })
