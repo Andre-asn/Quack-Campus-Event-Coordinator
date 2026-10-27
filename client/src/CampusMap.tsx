@@ -219,12 +219,12 @@ export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, 
         </View>
       ) : null}
       <Pressable
-        accessibilityLabel="Events in view"
+        accessibilityLabel="Events in this view"
         accessibilityRole="button"
         onPress={() => setViewList(true)}
         style={[styles.listButton, { bottom: Math.max(insets.bottom, bottomInset) + 16 }]}
       >
-        <Text style={styles.listButtonText}>Events in view</Text>
+        <Text style={styles.listButtonText}>Events in this view</Text>
       </Pressable>
       <EventList
         closeLabel="Close show all"
@@ -234,10 +234,10 @@ export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, 
         visible={showAll !== null}
       />
       <EventList
-        closeLabel="Close events in view"
+        closeLabel="Close events in this view"
         events={events}
         onClose={() => setViewList(false)}
-        title="Events in view"
+        title="Events in this view"
         visible={viewList}
       />
       <StatusBar style={lightPreset === 'dusk' || lightPreset === 'night' ? 'light' : 'dark'} />
