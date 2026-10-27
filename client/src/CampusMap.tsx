@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
-import Mapbox, { Camera, CircleLayer, MapView, StyleImport, VectorSource } from '@rnmapbox/maps';
+import { FlatList, Image, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Mapbox, { Camera, CircleLayer, MapView, MarkerView, StyleImport, VectorSource } from '@rnmapbox/maps';
 import type { Position } from 'geojson';
 import { StatusBar } from 'expo-status-bar';
 
 import { mapboxAccessToken, stevensCenter } from './config';
+import { campusDayKey } from './campusTime';
+import { groupBySpot, loadMapEvents, type MapEvent, type Spot } from './mapEvents';
 
 if (mapboxAccessToken) {
   void Mapbox.setAccessToken(mapboxAccessToken);
@@ -32,6 +35,8 @@ function lightPresetFor(hour: number): 'dawn' | 'day' | 'dusk' | 'night' {
 export type PinnedPlace = { latitude: number; longitude: number; name: string | null };
 
 type Props = {
+  sessionId: string;
+  refreshKey?: number;
   // Height of the sheet covering the bottom of the map. The map center, and so the pin, sits above it.
   bottomInset?: number;
   onPinMoved?: (place: PinnedPlace) => void;
@@ -66,18 +71,85 @@ async function placeAt(map: MapView | null, center: Position): Promise<PinnedPla
   return { latitude, longitude, name };
 }
 
-export default function CampusMap({ bottomInset = 0, onPinMoved }: Props) {
+export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, onPinMoved }: Props) {
+  const insets = useSafeAreaInsets();
   const mapRef = useRef<MapView>(null);
   // Lookups can finish out of order; only the newest may move the pin.
   const latestLookup = useRef(0);
   const [failed, setFailed] = useState(false);
   const [lightPreset, setLightPreset] = useState(() => lightPresetFor(new Date().getHours()));
+  const [day, setDay] = useState(() => campusDayKey(new Date()));
+  const [bbox, setBbox] = useState<string | null>(null);
+  const [events, setEvents] = useState<MapEvent[]>([]);
+  const [loadError, setLoadError] = useState(false);
+  const [showAll, setShowAll] = useState<Spot | null>(null);
+  const [viewList, setViewList] = useState(false);
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Keep the lighting in step with the clock while the app stays open.
   useEffect(() => {
-    const timer = setInterval(() => setLightPreset(lightPresetFor(new Date().getHours())), 60_000);
+    const timer = setInterval(() => {
+      const now = new Date();
+      setLightPreset(lightPresetFor(now.getHours()));
+      setDay(campusDayKey(now));
+    }, 60_000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    return () => {
+      if (debounce.current) {
+        clearTimeout(debounce.current);
+      }
+    };
+  }, []);
+
+  // The viewport string only changes after panning settles, so this does not fire per frame.
+  useEffect(() => {
+    if (!bbox) {
+      return;
+    }
+    const controller = new AbortController();
+    let cancelled = false;
+    setEvents([]);
+    setLoadError(false);
+    setShowAll(null);
+    setViewList(false);
+    void loadMapEvents(sessionId, bbox, controller.signal)
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+        setEvents(result.events);
+        setLoadError(false);
+      })
+      .catch((error: unknown) => {
+        if (cancelled || (error instanceof Error && error.name === 'AbortError')) {
+          return;
+        }
+        setLoadError(true);
+      });
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [bbox, day, refreshKey, sessionId]);
+
+  function scheduleQuery(
+    event: { properties: { bounds: { ne: readonly number[]; sw: readonly number[] } } },
+    delay: number,
+  ) {
+    const { ne, sw } = event.properties.bounds;
+    const next = `${sw[0]},${sw[1]},${ne[0]},${ne[1]}`;
+    if (debounce.current) {
+      clearTimeout(debounce.current);
+    }
+    if (delay === 0) {
+      setBbox(next);
+      return;
+    }
+    debounce.current = setTimeout(() => setBbox(next), delay);
+  }
 
   if (!mapboxAccessToken) {
     return (
@@ -92,14 +164,19 @@ export default function CampusMap({ bottomInset = 0, onPinMoved }: Props) {
       <MapView
         ref={mapRef}
         accessibilityLabel="Map of the Stevens campus"
-        onMapIdle={onPinMoved && ((state) => {
+        onCameraChanged={(event) => scheduleQuery(event, 400)}
+        onMapIdle={(state) => {
+          scheduleQuery(state, 0);
+          if (!onPinMoved) {
+            return;
+          }
           const lookup = ++latestLookup.current;
           void placeAt(mapRef.current, state.properties.center).then((place) => {
             if (lookup === latestLookup.current) {
               onPinMoved(place);
             }
           });
-        })}
+        }}
         // Only a style failure leaves the map blank; a missing tile or sprite does not.
         onMapLoadingError={(payload) => {
           if (!payload?.type || payload.type === 'style') {
@@ -121,15 +198,133 @@ export default function CampusMap({ bottomInset = 0, onPinMoved }: Props) {
           defaultSettings={{ centerCoordinate: stevensCenter, pitch: 45, zoomLevel: 16 }}
           padding={{ paddingBottom: bottomInset }}
         />
+        {groupBySpot(events).map((spot) => (
+          <MarkerView
+            key={`${spot.latitude},${spot.longitude}`}
+            allowOverlap
+            coordinate={[spot.longitude, spot.latitude]}
+          >
+            <SpotBubble spot={spot} onShowAll={() => setShowAll(spot)} />
+          </MarkerView>
+        ))}
       </MapView>
+      {loadError ? (
+        <View pointerEvents="none" style={styles.empty}>
+          <Text style={styles.errorText}>Couldn't load events. Pan the map to try again.</Text>
+        </View>
+      ) : null}
+      <Pressable
+        accessibilityLabel="Events in this view"
+        accessibilityRole="button"
+        onPress={() => setViewList(true)}
+        style={[styles.listButton, { bottom: Math.max(insets.bottom, bottomInset) + 16 }]}
+      >
+        <Text style={styles.listButtonText}>Events in this view</Text>
+      </Pressable>
+      <EventList
+        closeLabel="Close show all"
+        events={showAll?.events ?? []}
+        onClose={() => setShowAll(null)}
+        title="Show all"
+        visible={showAll !== null}
+      />
+      <EventList
+        closeLabel="Close events in this view"
+        events={events}
+        onClose={() => setViewList(false)}
+        title="Events in this view"
+        visible={viewList}
+      />
       <StatusBar style={lightPreset === 'dusk' || lightPreset === 'night' ? 'light' : 'dark'} />
     </>
   );
 }
 
+function SpotBubble({ spot, onShowAll }: { spot: Spot; onShowAll: () => void }) {
+  const visible = spot.events.slice(0, 3);
+  const overflow = spot.events.length > 3;
+  return (
+    <View style={styles.bubbles}>
+      {visible.map((event, index) => (
+        <Pressable
+          accessibilityLabel={event.title}
+          accessibilityRole="button"
+          key={event.id}
+          onPress={onShowAll}
+        >
+          <Avatar event={event} overlap={index > 0} />
+        </Pressable>
+      ))}
+      {overflow ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Show all"
+          onPress={onShowAll}
+          style={styles.ellipsis}
+        >
+          <Text style={styles.ellipsisText}>...</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+function Avatar({ event, overlap = false }: { event: MapEvent; overlap?: boolean }) {
+  const shift = overlap ? styles.overlap : null;
+  if (event.host.avatarUrl) {
+    return <Image accessibilityLabel={event.host.displayName} source={{ uri: event.host.avatarUrl }} style={[styles.avatar, shift]} />;
+  }
+  return (
+    <View accessibilityLabel={event.host.displayName} style={[styles.avatarFallback, shift]}>
+      <Text style={styles.fallbackText}>{event.host.displayName.slice(0, 1)}</Text>
+    </View>
+  );
+}
+
+function EventList({
+  title,
+  events,
+  visible,
+  closeLabel,
+  onClose,
+}: {
+  title: string;
+  events: MapEvent[];
+  visible: boolean;
+  closeLabel: string;
+  onClose: () => void;
+}) {
+  return (
+    <Modal animationType="slide" onRequestClose={onClose} transparent visible={visible}>
+      <View style={styles.sheetBackdrop}>
+        <View style={styles.sheet}>
+          <Text style={styles.sheetTitle}>{title}</Text>
+          <FlatList
+            data={events}
+            keyExtractor={(event) => event.id}
+            ListEmptyComponent={<Text style={styles.rowMeta}>No events in this view</Text>}
+            renderItem={({ item }) => (
+              <View style={styles.row}>
+                <Avatar event={item} />
+                <View style={styles.rowText}>
+                  <Text style={styles.rowTitle}>{item.title}</Text>
+                  <Text style={styles.rowMeta}>{item.host.displayName}</Text>
+                </View>
+              </View>
+            )}
+          />
+          <Pressable accessibilityLabel={closeLabel} accessibilityRole="button" onPress={onClose} style={styles.close}>
+            <Text style={styles.closeText}>Close</Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 function MapUnavailable({ detail }: { detail: string }) {
   return (
-    <View accessibilityRole="alert" style={styles.unavailable}>
+    <View style={styles.unavailable}>
       <Text style={styles.title}>Map unavailable</Text>
       <Text style={styles.detail}>{detail}</Text>
     </View>
@@ -155,5 +350,118 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     maxWidth: 320,
     textAlign: 'center',
+  },
+  bubbles: {
+    flexDirection: 'row',
+  },
+  avatar: {
+    borderColor: '#fff',
+    borderRadius: 16,
+    borderWidth: 2,
+    height: 32,
+    width: 32,
+  },
+  overlap: {
+    marginLeft: -6,
+  },
+  avatarFallback: {
+    alignItems: 'center',
+    backgroundColor: '#111',
+    borderColor: '#fff',
+    borderRadius: 16,
+    borderWidth: 2,
+    height: 32,
+    justifyContent: 'center',
+    width: 32,
+  },
+  fallbackText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  ellipsis: {
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    elevation: 2,
+    height: 32,
+    justifyContent: 'center',
+    marginLeft: -6,
+    width: 32,
+  },
+  ellipsisText: {
+    color: '#111',
+    fontSize: 16,
+    fontWeight: '700',
+    marginTop: -6,
+  },
+  listButton: {
+    backgroundColor: '#fff',
+    borderRadius: 999,
+    elevation: 3,
+    justifyContent: 'center',
+    left: 16,
+    minHeight: 44,
+    paddingHorizontal: 16,
+    position: 'absolute',
+  },
+  listButtonText: {
+    color: '#111',
+    fontWeight: '600',
+  },
+  empty: {
+    alignSelf: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 999,
+    elevation: 2,
+    marginTop: 72,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  errorText: {
+    color: '#8a1f1f',
+  },
+  sheetBackdrop: {
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  sheet: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    maxHeight: '70%',
+    padding: 16,
+  },
+  sheetTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    marginBottom: 12,
+  },
+  row: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+    paddingVertical: 8,
+  },
+  rowText: {
+    flex: 1,
+  },
+  rowTitle: {
+    color: '#111',
+    fontWeight: '600',
+  },
+  rowMeta: {
+    color: '#666',
+  },
+  close: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+    minHeight: 44,
+  },
+  closeText: {
+    color: '#111',
+    fontWeight: '600',
   },
 });
