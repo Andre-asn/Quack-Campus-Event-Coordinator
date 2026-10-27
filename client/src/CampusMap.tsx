@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { FlatList, Image, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Mapbox, { Camera, CircleLayer, MapView, MarkerView, StyleImport, VectorSource } from '@rnmapbox/maps';
 import type { Position } from 'geojson';
 import { StatusBar } from 'expo-status-bar';
@@ -71,6 +72,7 @@ async function placeAt(map: MapView | null, center: Position): Promise<PinnedPla
 }
 
 export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, onPinMoved }: Props) {
+  const insets = useSafeAreaInsets();
   const mapRef = useRef<MapView>(null);
   // Lookups can finish out of order; only the newest may move the pin.
   const latestLookup = useRef(0);
@@ -82,6 +84,7 @@ export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, 
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [showAll, setShowAll] = useState<Spot | null>(null);
+  const [viewList, setViewList] = useState(false);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Keep the lighting in step with the clock while the app stays open.
@@ -112,6 +115,7 @@ export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, 
     setLoaded(false);
     setLoadError(false);
     setShowAll(null);
+    setViewList(false);
     void loadMapEvents(sessionId, bbox)
       .then((result) => {
         if (cancelled) {
@@ -214,7 +218,28 @@ export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, 
           <Text style={styles.errorText}>Couldn't load events. Pan the map to try again.</Text>
         </View>
       ) : null}
-      <ShowAll spot={showAll} onClose={() => setShowAll(null)} />
+      <Pressable
+        accessibilityLabel="Events in view"
+        accessibilityRole="button"
+        onPress={() => setViewList(true)}
+        style={[styles.listButton, { bottom: Math.max(insets.bottom, bottomInset) + 16 }]}
+      >
+        <Text style={styles.listButtonText}>Events in view</Text>
+      </Pressable>
+      <EventList
+        closeLabel="Close show all"
+        events={showAll?.events ?? []}
+        onClose={() => setShowAll(null)}
+        title="Show all"
+        visible={showAll !== null}
+      />
+      <EventList
+        closeLabel="Close events in view"
+        events={events}
+        onClose={() => setViewList(false)}
+        title="Events in view"
+        visible={viewList}
+      />
       <StatusBar style={lightPreset === 'dusk' || lightPreset === 'night' ? 'light' : 'dark'} />
     </>
   );
@@ -261,15 +286,28 @@ function Avatar({ event, overlap = false }: { event: MapEvent; overlap?: boolean
   );
 }
 
-function ShowAll({ spot, onClose }: { spot: Spot | null; onClose: () => void }) {
+function EventList({
+  title,
+  events,
+  visible,
+  closeLabel,
+  onClose,
+}: {
+  title: string;
+  events: MapEvent[];
+  visible: boolean;
+  closeLabel: string;
+  onClose: () => void;
+}) {
   return (
-    <Modal animationType="slide" onRequestClose={onClose} transparent visible={spot !== null}>
+    <Modal animationType="slide" onRequestClose={onClose} transparent visible={visible}>
       <View style={styles.sheetBackdrop}>
         <View style={styles.sheet}>
-          <Text style={styles.sheetTitle}>Show all</Text>
+          <Text style={styles.sheetTitle}>{title}</Text>
           <FlatList
-            data={spot?.events ?? []}
+            data={events}
             keyExtractor={(event) => event.id}
+            ListEmptyComponent={<Text style={styles.rowMeta}>No events in this view</Text>}
             renderItem={({ item }) => (
               <View style={styles.row}>
                 <Avatar event={item} />
@@ -280,7 +318,7 @@ function ShowAll({ spot, onClose }: { spot: Spot | null; onClose: () => void }) 
               </View>
             )}
           />
-          <Pressable accessibilityRole="button" accessibilityLabel="Close show all" onPress={onClose} style={styles.close}>
+          <Pressable accessibilityLabel={closeLabel} accessibilityRole="button" onPress={onClose} style={styles.close}>
             <Text style={styles.closeText}>Close</Text>
           </Pressable>
         </View>
@@ -361,6 +399,20 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     marginTop: -6,
+  },
+  listButton: {
+    backgroundColor: '#fff',
+    borderRadius: 999,
+    elevation: 3,
+    justifyContent: 'center',
+    left: 16,
+    minHeight: 44,
+    paddingHorizontal: 16,
+    position: 'absolute',
+  },
+  listButtonText: {
+    color: '#111',
+    fontWeight: '600',
   },
   empty: {
     alignSelf: 'center',

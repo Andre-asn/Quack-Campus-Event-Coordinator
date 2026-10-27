@@ -118,6 +118,28 @@ class MapEventsIT extends PostgresIntegrationTest {
     }
 
     @Test
+    void returnsEventsInsideTheHalfOpenRange() {
+        User host = host("ada");
+        Instant from = startOfToday();
+        Instant to = startOfTomorrow();
+        save(host, "Before from", 40.745, -74.025, from.minusSeconds(1));
+        save(host, "At from", 40.745, -74.024, from);
+        save(host, "Before to", 40.746, -74.025, to.minusSeconds(1));
+        save(host, "At to", 40.746, -74.024, to);
+
+        client.get().uri(mapUri(BBOX, from, to, 50, null))
+                .header(HttpHeaders.COOKIE, "JSESSIONID=" + sessionFor(host))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.events.length()").isEqualTo(2)
+                .jsonPath("$.events[0].title").isEqualTo("At from")
+                .jsonPath("$.events[1].title").isEqualTo("Before to")
+                .jsonPath("$.events[?(@.title == 'Before from')]").isEmpty()
+                .jsonPath("$.events[?(@.title == 'At to')]").isEmpty();
+    }
+
+    @Test
     void rejectsDatesOutsideYesterdayTodayAndTomorrow() {
         User host = host("ada");
         Instant tooEarly = startOfToday().minus(3, ChronoUnit.DAYS);
