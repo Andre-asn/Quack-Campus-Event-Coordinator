@@ -81,7 +81,6 @@ export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, 
   const [day, setDay] = useState(() => campusDayKey(new Date()));
   const [bbox, setBbox] = useState<string | null>(null);
   const [events, setEvents] = useState<MapEvent[]>([]);
-  const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [showAll, setShowAll] = useState<Spot | null>(null);
   const [viewList, setViewList] = useState(false);
@@ -110,28 +109,29 @@ export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, 
     if (!bbox) {
       return;
     }
+    const controller = new AbortController();
     let cancelled = false;
     setEvents([]);
-    setLoaded(false);
     setLoadError(false);
     setShowAll(null);
     setViewList(false);
-    void loadMapEvents(sessionId, bbox)
+    void loadMapEvents(sessionId, bbox, controller.signal)
       .then((result) => {
         if (cancelled) {
           return;
         }
         setEvents(result.events);
-        setLoaded(true);
         setLoadError(false);
       })
-      .catch(() => {
-        if (!cancelled) {
-          setLoadError(true);
+      .catch((error: unknown) => {
+        if (cancelled || (error instanceof Error && error.name === 'AbortError')) {
+          return;
         }
+        setLoadError(true);
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [bbox, day, refreshKey, sessionId]);
 
@@ -208,11 +208,6 @@ export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, 
           </MarkerView>
         ))}
       </MapView>
-      {loaded && !loadError && events.length === 0 ? (
-        <View pointerEvents="none" style={styles.empty}>
-          <Text style={styles.emptyText}>No events in this view</Text>
-        </View>
-      ) : null}
       {loadError ? (
         <View pointerEvents="none" style={styles.empty}>
           <Text style={styles.errorText}>Couldn't load events. Pan the map to try again.</Text>
@@ -422,9 +417,6 @@ const styles = StyleSheet.create({
     marginTop: 72,
     paddingHorizontal: 14,
     paddingVertical: 8,
-  },
-  emptyText: {
-    color: '#444',
   },
   errorText: {
     color: '#8a1f1f',

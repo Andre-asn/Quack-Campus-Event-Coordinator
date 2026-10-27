@@ -39,13 +39,19 @@ class MapEventQuery {
                   and e.status = 'active'
                   and e.starts_at >= ?
                   and e.starts_at < ?
+                  and e.location && ST_MakeEnvelope(?, ?, ?, ?, 4326)::geography
+                  -- Geography edges are geodesics and bow north of the south latitude, so the rectangle is checked in geometry.
                   and ST_Intersects(
-                        e.location,
-                        ST_MakeEnvelope(?, ?, ?, ?, 4326)::geography)
+                        e.location::geometry,
+                        ST_MakeEnvelope(?, ?, ?, ?, 4326))
                 """;
         List<Object> args = new ArrayList<>();
         args.add(Timestamp.from(from));
         args.add(Timestamp.from(to));
+        args.add(west);
+        args.add(south);
+        args.add(east);
+        args.add(north);
         args.add(west);
         args.add(south);
         args.add(east);

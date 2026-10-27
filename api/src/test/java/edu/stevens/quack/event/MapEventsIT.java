@@ -72,6 +72,7 @@ class MapEventsIT extends PostgresIntegrationTest {
         Instant today = noonToday();
         save(host, "Inside", 40.745, -74.025, today);
         save(host, "North edge", 40.75, -74.025, today);
+        save(host, "South edge", 40.74, -74.025, today);
         save(host, "Outside", 40.751, -74.025, today);
 
         client.get().uri(mapUri(BBOX, startOfToday(), startOfTomorrow(), 50, null))
@@ -79,9 +80,10 @@ class MapEventsIT extends PostgresIntegrationTest {
                 .exchange()
                 .expectStatus().isOk()
                 .expectBody()
-                .jsonPath("$.events.length()").isEqualTo(2)
+                .jsonPath("$.events.length()").isEqualTo(3)
                 .jsonPath("$.events[?(@.title == 'Outside')]").isEmpty()
                 .jsonPath("$.events[?(@.title == 'North edge')]").isNotEmpty()
+                .jsonPath("$.events[?(@.title == 'South edge')]").isNotEmpty()
                 .jsonPath("$.events[0].description").doesNotExist()
                 .jsonPath("$.events[0].host.avatarUrl").isEqualTo("https://example.test/ada.png")
                 .jsonPath("$.nextCursor").doesNotExist();

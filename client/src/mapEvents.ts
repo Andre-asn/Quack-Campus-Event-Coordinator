@@ -27,6 +27,9 @@ export type Spot = {
 
 let cached: { url: string; etag: string; events: MapEvent[] } | null = null;
 
+// The first page is included. Four more pages is 500 events, then the map stops.
+const maxExtraPages = 4;
+
 export function groupBySpot(events: MapEvent[]): Spot[] {
   const groups = new Map<string, MapEvent[]>();
   for (const event of events) {
@@ -45,6 +48,7 @@ export function groupBySpot(events: MapEvent[]): Spot[] {
 export async function loadMapEvents(
   sessionId: string,
   bbox: string,
+  signal?: AbortSignal,
 ): Promise<{ events: MapEvent[]; unchanged: boolean }> {
   const { from, to } = campusDayRange(new Date());
   const url = `${apiBaseUrl}/api/v1/events?bbox=${encodeURIComponent(bbox)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=100`;
@@ -55,7 +59,7 @@ export async function loadMapEvents(
   if (cached?.url === url) {
     headers['If-None-Match'] = cached.etag;
   }
-  const response = await fetch(url, { headers });
+  const response = await fetch(url, { headers, signal });
   if (response.status === 304 && cached?.url === url) {
     return { events: cached.events, unchanged: false };
   }
@@ -66,9 +70,12 @@ export async function loadMapEvents(
   const page = (await response.json()) as MapEventPage;
   const events = [...(page.events ?? [])];
   let cursor = page.nextCursor;
-  while (cursor) {
+  let extraPages = 0;
+  while (cursor && extraPages < maxExtraPages) {
+    extraPages += 1;
     const next = await fetch(`${url}&cursor=${encodeURIComponent(cursor)}`, {
       headers: { Accept: 'application/json', Cookie: headers.Cookie },
+      signal,
     });
     if (!next.ok) {
       throw new Error(`Map query failed (${next.status})`);
