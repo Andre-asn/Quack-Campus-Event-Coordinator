@@ -122,6 +122,8 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  // Whether `error` came with field errors, so the banner only repeats it when no field shows them.
+  const [errorHasFields, setErrorHasFields] = useState(false);
   // The pin the server rejected; moving the pin hides that error.
   const [rejectedPlace, setRejectedPlace] = useState<PinnedPlace | null>(null);
 
@@ -220,6 +222,13 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
     ? fieldErrors.location ?? fieldErrors.latitude ?? fieldErrors.longitude
     : undefined;
   const whereError = fieldErrors.locationLabel ?? pinError;
+  const anyFieldShown = Boolean(
+    fieldErrors.title || fieldErrors.description || fieldErrors.category || fieldErrors.startsAt || whereError,
+  );
+  // E.g. the pin moved while posting: its error no longer shows, so the banner explains the failure.
+  const banner = error && (!errorHasFields || (Object.keys(fieldErrors).length > 0 && !anyFieldShown))
+    ? error
+    : null;
 
   async function post() {
     if (!place || !category) {
@@ -230,6 +239,7 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
     if (allowedStart.getTime() !== startsAt.getTime()) {
       setStartsAt(allowedStart);
       setError('Start time was updated to fit the next 48 hours. Review it before posting.');
+      setErrorHasFields(false);
       return;
     }
     setBusy(true);
@@ -252,14 +262,17 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
     setBusy(false);
     setFieldErrors(outcome.fieldErrors);
     setRejectedPlace(place);
-    // Errors that belong to a field show under it; anything else shows above Post.
-    setError(Object.keys(outcome.fieldErrors).length ? null : outcome.message);
+    // Errors that belong to a field show under it; the banner covers the rest.
+    setError(outcome.message);
+    setErrorHasFields(Object.keys(outcome.fieldErrors).length > 0);
   }
 
   function inputProps(name: FieldName) {
     return {
       onBlur: () => setFocused(null),
       onFocus: () => setFocused(name),
+      // Locked while posting, so a reply can't pin an old error on a field the host already fixed.
+      editable: !busy,
       placeholderTextColor: colors.muted,
       style: [styles.input, focused === name && styles.inputFocused],
     };
@@ -390,7 +403,8 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
                     <Pressable
                       accessibilityLabel={text}
                       accessibilityRole="radio"
-                      accessibilityState={{ checked: selected }}
+                      accessibilityState={{ checked: selected, disabled: busy }}
+                      disabled={busy}
                       key={name}
                       onPress={() => {
                         setCategory(name);
@@ -414,6 +428,7 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
                   <ClockIcon height={20} width={20} />
                   <DateTimePicker
                     accessibilityLabel={`When: ${when}`}
+                    disabled={busy}
                     display="compact"
                     maximumDate={new Date(Date.now() + MAX_AHEAD_MS)}
                     minimumDate={new Date()}
@@ -430,6 +445,8 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
                   accessibilityHint="Opens a date and time picker"
                   accessibilityLabel={`When: ${when}`}
                   accessibilityRole="button"
+                  accessibilityState={{ disabled: busy }}
+                  disabled={busy}
                   onPress={() => pickOnAndroid(startsAt, (date) => {
                     setStartsAt(date);
                     clearErrors('startsAt');
@@ -466,9 +483,9 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
             </Field>
           </ScrollView>
 
-          {error ? (
+          {banner ? (
             <Text accessibilityLiveRegion="polite" accessibilityRole="alert" style={styles.error}>
-              {error}
+              {banner}
             </Text>
           ) : null}
           <Pressable
