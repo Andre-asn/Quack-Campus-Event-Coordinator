@@ -1,13 +1,15 @@
 package edu.stevens.quack.event;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 public class InvalidEventException extends RuntimeException {
 
     private final List<InvalidField> errors;
 
     public InvalidEventException(List<InvalidField> errors) {
-        super("One or more fields are invalid.");
+        // The field details joined, so a client that shows only detail still says what to fix.
+        super(errors.stream().map(InvalidField::detail).collect(Collectors.joining(" ")));
         this.errors = List.copyOf(errors);
     }
 

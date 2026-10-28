@@ -12,11 +12,7 @@ public record CampusProperties(double west, double south, double east, double no
         }
     }
 
-    boolean containsLatitude(double latitude) {
-        return latitude >= south && latitude <= north;
-    }
-
-    boolean containsLongitude(double longitude) {
-        return longitude >= west && longitude <= east;
+    boolean contains(double latitude, double longitude) {
+        return latitude >= south && latitude <= north && longitude >= west && longitude <= east;
     }
 }

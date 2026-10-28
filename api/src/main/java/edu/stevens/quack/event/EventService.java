@@ -33,6 +33,8 @@ public class EventService {
     // The varchar(255) columns for title and location_label.
     private static final int MAX_TEXT = 255;
     private static final Duration MAX_AHEAD = Duration.ofHours(48);
+    // The client offers up to its own clock's now + 48h, so a device a little ahead of the server still passes.
+    private static final Duration CLOCK_SKEW = Duration.ofMinutes(5);
 
     private final EventRepository events;
     private final MapEventQuery mapEvents;
@@ -56,20 +58,32 @@ public class EventService {
     @Transactional
     public Event create(EventController.CreateEventRequest request) {
         User host = currentUser.require();
-        validate(request);
         // Postgres stores timestamp(6), so keep microseconds or the read-back value drifts.
-        Event event = Event.create(
-                UUID.randomUUID(),
-                host.getId(),
-                request.title(),
-                request.description(),
+        EventController.CreateEventRequest clean = new EventController.CreateEventRequest(
+                strip(request.title()),
+                strip(request.description()),
                 request.category(),
                 request.latitude(),
                 request.longitude(),
-                request.locationLabel(),
-                request.startsAt(),
+                strip(request.locationLabel()),
+                request.startsAt() == null ? null : request.startsAt().truncatedTo(ChronoUnit.MICROS));
+        validate(clean);
+        Event event = Event.create(
+                UUID.randomUUID(),
+                host.getId(),
+                clean.title(),
+                clean.description(),
+                clean.category(),
+                clean.latitude(),
+                clean.longitude(),
+                clean.locationLabel(),
+                clean.startsAt(),
                 clock.instant().truncatedTo(ChronoUnit.MICROS));
         return events.save(event);
+    }
+
+    private static String strip(String value) {
+        return value == null ? null : value.strip();
     }
 
     // Reports every invalid field at once, so the host can fix them in one pass.
@@ -88,19 +102,20 @@ public class EventService {
 
         if (request.startsAt() == null) {
             errors.add(invalid("startsAt", "REQUIRED", "Start time is required."));
-        } else if (request.startsAt().isAfter(clock.instant().plus(MAX_AHEAD))) {
+        } else if (request.startsAt().isAfter(clock.instant().plus(MAX_AHEAD).plus(CLOCK_SKEW))) {
             errors.add(invalid("startsAt", "TOO_FAR_AHEAD", "Start time must be at most 48 hours ahead."));
         }
 
         if (request.latitude() == null) {
             errors.add(invalid("latitude", "REQUIRED", "Latitude is required."));
-        } else if (!campus.containsLatitude(request.latitude())) {
-            errors.add(invalid("latitude", "OUTSIDE_CAMPUS", "The pin must be on the Stevens campus."));
         }
         if (request.longitude() == null) {
             errors.add(invalid("longitude", "REQUIRED", "Longitude is required."));
-        } else if (!campus.containsLongitude(request.longitude())) {
-            errors.add(invalid("longitude", "OUTSIDE_CAMPUS", "The pin must be on the Stevens campus."));
+        }
+        // One error for the pin as a whole: the client places it on the map, not as two numbers.
+        if (request.latitude() != null && request.longitude() != null
+                && !campus.contains(request.latitude(), request.longitude())) {
+            errors.add(invalid("location", "OUTSIDE_CAMPUS", "The pin must be on the Stevens campus."));
         }
 
         if (!errors.isEmpty()) {

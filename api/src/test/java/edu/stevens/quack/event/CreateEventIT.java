@@ -164,7 +164,33 @@ class CreateEventIT extends PostgresIntegrationTest {
     void rejectsADescriptionLongerThanOneHundredFortyCharacters() {
         User host = signIn();
 
-        expectInvalid(post(host, valid(Map.of("description", "x".repeat(141)))), "description", "TOO_LONG");
+        RestTestClient.ResponseSpec response = post(host, valid(Map.of("description", "x".repeat(141))));
+
+        // detail carries the reason too, for clients that show only the top-level message.
+        response.expectBody().jsonPath("$.detail").isEqualTo("Description must be at most 140 characters.");
+        expectInvalid(response, "description", "TOO_LONG");
+    }
+
+    @Test
+    void trimsTextBeforeCheckingAndStoringIt() {
+        User host = signIn();
+        Map<String, Object> body = valid(Map.of(
+                "title", "  CS102 study group  ",
+                "description", "x".repeat(140) + "   "));
+
+        post(host, body).expectStatus().isCreated();
+
+        Map<String, Object> row = jdbc.queryForMap("select title, description from events");
+        assertThat(row.get("title")).isEqualTo("CS102 study group");
+        assertThat(row.get("description")).isEqualTo("x".repeat(140));
+    }
+
+    @Test
+    void allowsAFewMinutesOfClockSkewPastFortyEightHours() {
+        User host = signIn();
+        Instant justPast = Instant.now().plus(48, ChronoUnit.HOURS).plus(1, ChronoUnit.MINUTES);
+
+        post(host, valid(Map.of("startsAt", justPast.toString()))).expectStatus().isCreated();
     }
 
     @Test
@@ -189,14 +215,7 @@ class CreateEventIT extends PostgresIntegrationTest {
         // Times Square: off campus on both axes.
         Map<String, Object> body = valid(Map.of("latitude", 40.7580, "longitude", -73.9855));
 
-        post(host, body)
-                .expectStatus().isEqualTo(422)
-                .expectBody()
-                .jsonPath("$.code").isEqualTo("INVALID_EVENT")
-                .jsonPath("$.errors.length()").isEqualTo(2)
-                .jsonPath("$.errors[?(@.field == 'latitude' && @.code == 'OUTSIDE_CAMPUS')]").isNotEmpty()
-                .jsonPath("$.errors[?(@.field == 'longitude' && @.code == 'OUTSIDE_CAMPUS')]").isNotEmpty();
-        assertNoEvents();
+        expectInvalid(post(host, body), "location", "OUTSIDE_CAMPUS");
     }
 
     @Test
