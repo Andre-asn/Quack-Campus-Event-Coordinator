@@ -33,7 +33,7 @@ public class EventService {
     // The varchar(255) columns for title and location_label.
     private static final int MAX_TEXT = 255;
     private static final Duration MAX_AHEAD = Duration.ofHours(48);
-    // The client offers up to its own clock's now + 48h, so a device a little ahead of the server still passes.
+    // The client clamps to its own clock (now to now + 48h), so a device a few minutes off the server still passes.
     private static final Duration CLOCK_SKEW = Duration.ofMinutes(5);
 
     private final EventRepository events;
@@ -102,6 +102,8 @@ public class EventService {
 
         if (request.startsAt() == null) {
             errors.add(invalid("startsAt", "REQUIRED", "Start time is required."));
+        } else if (request.startsAt().isBefore(clock.instant().minus(CLOCK_SKEW))) {
+            errors.add(invalid("startsAt", "IN_PAST", "Start time can't be in the past."));
         } else if (request.startsAt().isAfter(clock.instant().plus(MAX_AHEAD).plus(CLOCK_SKEW))) {
             errors.add(invalid("startsAt", "TOO_FAR_AHEAD", "Start time must be at most 48 hours ahead."));
         }

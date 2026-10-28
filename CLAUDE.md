@@ -158,7 +158,7 @@ Visibility and authorization:
 - Only the host can edit or cancel. Started events can be edited; cancelled ones cannot.
 Validation:
  
-- Start time at most 48 hours ahead.
+- Start time not in the past and at most 48 hours ahead (a few minutes of clock skew allowed).
 - Description at most 140 characters.
 - Category required: `study`, `food`, `sports`, `games`, `movie`, `music`, `other`.
 - Coordinates inside the Stevens campus bounding box. Dorms count as on campus.

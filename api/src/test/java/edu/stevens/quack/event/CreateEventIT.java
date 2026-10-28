@@ -138,6 +138,22 @@ class CreateEventIT extends PostgresIntegrationTest {
     }
 
     @Test
+    void rejectsAStartInThePast() {
+        User host = signIn();
+        Instant anHourAgo = Instant.now().minus(1, ChronoUnit.HOURS);
+
+        expectInvalid(post(host, valid(Map.of("startsAt", anHourAgo.toString()))), "startsAt", "IN_PAST");
+    }
+
+    @Test
+    void allowsAFewMinutesOfClockSkewBeforeNow() {
+        User host = signIn();
+        Instant justBefore = Instant.now().minus(1, ChronoUnit.MINUTES);
+
+        post(host, valid(Map.of("startsAt", justBefore.toString()))).expectStatus().isCreated();
+    }
+
+    @Test
     void acceptsAStartJustInsideFortyEightHours() {
         User host = signIn();
         Instant almost = Instant.now().plus(48, ChronoUnit.HOURS).minus(1, ChronoUnit.MINUTES);
