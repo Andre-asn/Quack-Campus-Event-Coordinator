@@ -75,13 +75,13 @@ public class EventController {
         return token;
     }
 
-    // shortcut: field rules (48h, 140 chars, category, campus bbox, required fields) land with #36.
+    // Boxed coordinates, so a missing value is reported as missing rather than read as 0.
     public record CreateEventRequest(
             String title,
             String description,
             String category,
-            double latitude,
-            double longitude,
+            Double latitude,
+            Double longitude,
             String locationLabel,
             Instant startsAt) {
     }

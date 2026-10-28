@@ -4,11 +4,13 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
@@ -25,35 +27,117 @@ public class EventService {
 
     static final ZoneId CAMPUS = ZoneId.of("America/New_York");
     private static final int MAX_LIMIT = 100;
+    // Matches the events_category_check constraint in V3__create_events.sql.
+    private static final List<String> CATEGORIES = List.of("study", "food", "sports", "games", "movie", "music", "other");
+    private static final int MAX_DESCRIPTION = 140;
+    // The varchar(255) columns for title and location_label.
+    private static final int MAX_TEXT = 255;
+    private static final Duration MAX_AHEAD = Duration.ofHours(48);
+    // "Starting now" from a phone whose clock is a few minutes behind the server still passes. The 48h limit
+    // stays exact; the client caps its picker a few minutes early instead.
+    private static final Duration CLOCK_SKEW = Duration.ofMinutes(5);
 
     private final EventRepository events;
     private final MapEventQuery mapEvents;
     private final CurrentUser currentUser;
     private final Clock clock;
+    private final CampusProperties campus;
 
-    public EventService(EventRepository events, MapEventQuery mapEvents, CurrentUser currentUser, Clock clock) {
+    public EventService(
+            EventRepository events,
+            MapEventQuery mapEvents,
+            CurrentUser currentUser,
+            Clock clock,
+            CampusProperties campus) {
         this.events = events;
         this.mapEvents = mapEvents;
         this.currentUser = currentUser;
         this.clock = clock;
+        this.campus = campus;
     }
 
     @Transactional
     public Event create(EventController.CreateEventRequest request) {
         User host = currentUser.require();
         // Postgres stores timestamp(6), so keep microseconds or the read-back value drifts.
-        Event event = Event.create(
-                UUID.randomUUID(),
-                host.getId(),
-                request.title(),
-                request.description(),
+        EventController.CreateEventRequest clean = new EventController.CreateEventRequest(
+                strip(request.title()),
+                strip(request.description()),
                 request.category(),
                 request.latitude(),
                 request.longitude(),
-                request.locationLabel(),
-                request.startsAt(),
+                strip(request.locationLabel()),
+                request.startsAt() == null ? null : request.startsAt().truncatedTo(ChronoUnit.MICROS));
+        validate(clean);
+        Event event = Event.create(
+                UUID.randomUUID(),
+                host.getId(),
+                clean.title(),
+                clean.description(),
+                clean.category(),
+                clean.latitude(),
+                clean.longitude(),
+                clean.locationLabel(),
+                clean.startsAt(),
                 clock.instant().truncatedTo(ChronoUnit.MICROS));
         return events.save(event);
+    }
+
+    private static String strip(String value) {
+        return value == null ? null : value.strip();
+    }
+
+    // Reports every invalid field at once, so the host can fix them in one pass.
+    private void validate(EventController.CreateEventRequest request) {
+        List<InvalidEventException.InvalidField> errors = new ArrayList<>();
+        text(errors, "title", "Title", request.title(), MAX_TEXT);
+        text(errors, "description", "Description", request.description(), MAX_DESCRIPTION);
+        text(errors, "locationLabel", "Location label", request.locationLabel(), MAX_TEXT);
+
+        if (request.category() == null || request.category().isBlank()) {
+            errors.add(invalid("category", "REQUIRED", "Category is required."));
+        } else if (!CATEGORIES.contains(request.category())) {
+            errors.add(invalid("category", "UNKNOWN_CATEGORY",
+                    "Category must be one of " + String.join(", ", CATEGORIES) + "."));
+        }
+
+        if (request.startsAt() == null) {
+            errors.add(invalid("startsAt", "REQUIRED", "Start time is required."));
+        } else if (request.startsAt().isBefore(clock.instant().minus(CLOCK_SKEW))) {
+            errors.add(invalid("startsAt", "IN_PAST", "Start time can't be in the past."));
+        } else if (request.startsAt().isAfter(clock.instant().plus(MAX_AHEAD))) {
+            errors.add(invalid("startsAt", "TOO_FAR_AHEAD", "Start time must be at most 48 hours ahead."));
+        }
+
+        if (request.latitude() == null) {
+            errors.add(invalid("latitude", "REQUIRED", "Latitude is required."));
+        }
+        if (request.longitude() == null) {
+            errors.add(invalid("longitude", "REQUIRED", "Longitude is required."));
+        }
+        // One error for the pin as a whole: the client places it on the map, not as two numbers.
+        if (request.latitude() != null && request.longitude() != null
+                && !campus.contains(request.latitude(), request.longitude())) {
+            errors.add(invalid("location", "OUTSIDE_CAMPUS", "The pin must be on the Stevens campus."));
+        }
+
+        if (!errors.isEmpty()) {
+            throw new InvalidEventException(errors);
+        }
+    }
+
+    private static void text(
+            List<InvalidEventException.InvalidField> errors, String field, String name, String value, int max) {
+        if (value == null || value.isBlank()) {
+            errors.add(invalid(field, "REQUIRED", name + " is required."));
+        } else if (value.codePointCount(0, value.length()) > max) {
+            // Code points, because Postgres varchar limits count characters, not UTF-16 units.
+            errors.add(invalid(field, "TOO_LONG", name + " must be at most " + max + " characters."));
+        }
+    }
+
+    private static InvalidEventException.InvalidField invalid(String field, String code, String detail) {
+        return new InvalidEventException.InvalidField(field, code, detail);
     }
 
     @Transactional(readOnly = true)

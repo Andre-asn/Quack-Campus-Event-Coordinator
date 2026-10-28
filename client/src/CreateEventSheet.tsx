@@ -34,7 +34,7 @@ import CloseIcon from '../assets/create/close.svg';
 import PinShadow from '../assets/create/pin-shadow.svg';
 import PlaceIcon from '../assets/create/place.svg';
 import type { PinnedPlace } from './CampusMap';
-import { createEvent } from './events';
+import { createEvent, type FieldErrors } from './events';
 import { colors, fonts } from './theme';
 
 const categories = ['study', 'food', 'sports', 'games', 'movie', 'music', 'other'] as const;
@@ -63,7 +63,8 @@ function nextRoundHour(): Date {
   return date;
 }
 
-const MAX_AHEAD_MS = 48 * 60 * 60 * 1000;
+// The server rejects anything past exactly 48 hours, so stop 5 minutes short in case this phone's clock runs ahead.
+const MAX_AHEAD_MS = (48 * 60 - 5) * 60 * 1000;
 
 // Events can start any time from now to 48 hours ahead.
 function clampStart(date: Date): Date {
@@ -121,6 +122,21 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
   const [collapsed, setCollapsed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  // Whether `error` came with field errors, so the banner only repeats it when no field shows them.
+  const [errorHasFields, setErrorHasFields] = useState(false);
+  // The pin the server rejected; moving the pin hides that error.
+  const [rejectedPlace, setRejectedPlace] = useState<PinnedPlace | null>(null);
+
+  function clearErrors(...fields: string[]) {
+    setFieldErrors((current) => {
+      const next = { ...current };
+      for (const field of fields) {
+        delete next[field];
+      }
+      return next;
+    });
+  }
 
   const reduced = useReducedMotion();
   const { height: windowHeight } = useWindowDimensions();
@@ -202,6 +218,18 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
   const label = typedLabel ?? suggestedLabel;
   const ready = Boolean(title.trim() && description.trim() && category && label.trim() && place) && !busy;
   const when = formatWhen(startsAt);
+  // The pin has no input of its own, so its errors show under "Where exactly?".
+  const pinError = place === rejectedPlace
+    ? fieldErrors.location ?? fieldErrors.latitude ?? fieldErrors.longitude
+    : undefined;
+  const whereError = fieldErrors.locationLabel ?? pinError;
+  const anyFieldShown = Boolean(
+    fieldErrors.title || fieldErrors.description || fieldErrors.category || fieldErrors.startsAt || whereError,
+  );
+  // E.g. the pin moved while posting: its error no longer shows, so the banner explains the failure.
+  const banner = error && (!errorHasFields || (Object.keys(fieldErrors).length > 0 && !anyFieldShown))
+    ? error
+    : null;
 
   async function post() {
     if (!place || !category) {
@@ -212,10 +240,12 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
     if (allowedStart.getTime() !== startsAt.getTime()) {
       setStartsAt(allowedStart);
       setError('Start time was updated to fit the next 48 hours. Review it before posting.');
+      setErrorHasFields(false);
       return;
     }
     setBusy(true);
     setError(null);
+    setFieldErrors({});
     const outcome = await createEvent(sessionId, {
       title: title.trim(),
       description: description.trim(),
@@ -231,13 +261,19 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
       return;
     }
     setBusy(false);
+    setFieldErrors(outcome.fieldErrors);
+    setRejectedPlace(place);
+    // Errors that belong to a field show under it; the banner covers the rest.
     setError(outcome.message);
+    setErrorHasFields(Object.keys(outcome.fieldErrors).length > 0);
   }
 
   function inputProps(name: FieldName) {
     return {
       onBlur: () => setFocused(null),
       onFocus: () => setFocused(name),
+      // Locked while posting, so a reply can't pin an old error on a field the host already fixed.
+      editable: !busy,
       placeholderTextColor: colors.muted,
       style: [styles.input, focused === name && styles.inputFocused],
     };
@@ -321,12 +357,15 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
           </GestureDetector>
 
           <ScrollView contentContainerStyle={styles.fields} keyboardShouldPersistTaps="handled">
-            <Field label="Title">
+            <Field error={fieldErrors.title} label="Title">
               <TextInput
                 {...inputProps('title')}
                 accessibilityLabel="Title"
                 blurOnSubmit={false}
-                onChangeText={setTitle}
+                onChangeText={(text) => {
+                  setTitle(text);
+                  clearErrors('title');
+                }}
                 onSubmitEditing={() => descriptionRef.current?.focus()}
                 placeholder="Study session"
                 returnKeyType="next"
@@ -334,13 +373,21 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
               />
             </Field>
 
-            <Field help="One line. Nearby students see it on the map." label="What’s happening?" trailing={`${description.length}/140`}>
+            <Field
+              error={fieldErrors.description}
+              help="One line. Nearby students see it on the map."
+              label="What’s happening?"
+              trailing={`${description.length}/140`}
+            >
               <TextInput
                 {...inputProps('description')}
                 accessibilityHint="One line, up to 140 characters"
                 accessibilityLabel="What’s happening?"
                 maxLength={140}
-                onChangeText={setDescription}
+                onChangeText={(text) => {
+                  setDescription(text);
+                  clearErrors('description');
+                }}
                 placeholder="Studying for CS102!"
                 ref={descriptionRef}
                 value={description}
@@ -357,9 +404,13 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
                     <Pressable
                       accessibilityLabel={text}
                       accessibilityRole="radio"
-                      accessibilityState={{ checked: selected }}
+                      accessibilityState={{ checked: selected, disabled: busy }}
+                      disabled={busy}
                       key={name}
-                      onPress={() => setCategory(name)}
+                      onPress={() => {
+                        setCategory(name);
+                        clearErrors('category');
+                      }}
                       style={({ pressed }) => [styles.chip, selected && styles.chipSelected, pressed && styles.pressed]}
                     >
                       {selected ? <CheckIcon height={18} width={18} /> : null}
@@ -368,20 +419,25 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
                   );
                 })}
               </View>
+              {fieldErrors.category ? <FieldError message={fieldErrors.category} /> : null}
             </View>
 
-            <Field help="Defaults to the next hour. Up to 48 hours ahead." label="When">
+            <Field error={fieldErrors.startsAt} help="Defaults to the next hour. Up to 48 hours ahead." label="When">
               {Platform.OS === 'ios' ? (
                 // iOS shows its own compact date and time buttons, which enforce the range.
                 <View style={[styles.input, styles.inputRow, styles.iosWhen]}>
                   <ClockIcon height={20} width={20} />
                   <DateTimePicker
                     accessibilityLabel={`When: ${when}`}
+                    disabled={busy}
                     display="compact"
                     maximumDate={new Date(Date.now() + MAX_AHEAD_MS)}
                     minimumDate={new Date()}
                     mode="datetime"
-                    onValueChange={(_, date) => setStartsAt(clampStart(date))}
+                    onValueChange={(_, date) => {
+                      setStartsAt(clampStart(date));
+                      clearErrors('startsAt');
+                    }}
                     value={startsAt}
                   />
                 </View>
@@ -390,7 +446,12 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
                   accessibilityHint="Opens a date and time picker"
                   accessibilityLabel={`When: ${when}`}
                   accessibilityRole="button"
-                  onPress={() => pickOnAndroid(startsAt, setStartsAt)}
+                  accessibilityState={{ disabled: busy }}
+                  disabled={busy}
+                  onPress={() => pickOnAndroid(startsAt, (date) => {
+                    setStartsAt(date);
+                    clearErrors('startsAt');
+                  })}
                   style={({ pressed }) => [styles.input, styles.inputRow, pressed && styles.pressed]}
                 >
                   <ClockIcon height={20} width={20} />
@@ -400,6 +461,7 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
             </Field>
 
             <Field
+              error={whereError}
               help={typedLabel === null && suggestedLabel
                 ? 'Filled in from the map. Add a room or floor if it helps.'
                 : 'Type a room or landmark so people can find you.'}
@@ -410,7 +472,10 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
                 <TextInput
                   {...inputProps('label')}
                   accessibilityLabel="Where exactly?"
-                  onChangeText={setTypedLabel}
+                  onChangeText={(text) => {
+                    setTypedLabel(text);
+                    clearErrors('locationLabel');
+                  }}
                   placeholder="Library, 3rd floor"
                   style={styles.inputText}
                   value={label}
@@ -419,9 +484,9 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
             </Field>
           </ScrollView>
 
-          {error ? (
+          {banner ? (
             <Text accessibilityLiveRegion="polite" accessibilityRole="alert" style={styles.error}>
-              {error}
+              {banner}
             </Text>
           ) : null}
           <Pressable
@@ -440,18 +505,39 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
   );
 }
 
-function Field({ label, help, trailing, children }: { label: string; help?: string; trailing?: string; children: ReactNode }) {
+function Field({
+  label,
+  help,
+  trailing,
+  error,
+  children,
+}: {
+  label: string;
+  help?: string;
+  trailing?: string;
+  error?: string;
+  children: ReactNode;
+}) {
   return (
     <View style={styles.field}>
       <Text style={styles.label}>{label}</Text>
       {children}
-      {help ? (
+      {error || help ? (
         <View style={styles.helpRow}>
-          <Text style={[styles.help, styles.helpText]}>{help}</Text>
+          {/* The server's reason replaces the help line until the host edits the field. */}
+          {error ? <FieldError message={error} /> : <Text style={[styles.help, styles.helpText]}>{help}</Text>}
           {trailing ? <Text style={styles.help}>{trailing}</Text> : null}
         </View>
       ) : null}
     </View>
+  );
+}
+
+function FieldError({ message }: { message: string }) {
+  return (
+    <Text accessibilityLiveRegion="polite" accessibilityRole="alert" style={[styles.help, styles.helpText, styles.fieldError]}>
+      {message}
+    </Text>
   );
 }
 
@@ -591,6 +677,9 @@ const styles = StyleSheet.create({
   },
   helpText: {
     flex: 1,
+  },
+  fieldError: {
+    color: colors.red,
   },
   chips: {
     flexDirection: 'row',
