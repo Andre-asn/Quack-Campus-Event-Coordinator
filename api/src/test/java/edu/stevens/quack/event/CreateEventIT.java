@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -41,6 +43,9 @@ class CreateEventIT extends PostgresIntegrationTest {
 
     @Autowired
     JdbcTemplate jdbc;
+
+    @Autowired
+    CampusProperties campus;
 
     @BeforeEach
     @AfterEach
@@ -123,6 +128,140 @@ class CreateEventIT extends PostgresIntegrationTest {
                 .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
                 .expectBody()
                 .jsonPath("$.code").isEqualTo("MALFORMED_REQUEST");
+    }
+
+    @Test
+    void acceptsAnEventStartingNow() {
+        User host = signIn();
+
+        post(host, valid(Map.of("startsAt", Instant.now().toString()))).expectStatus().isCreated();
+    }
+
+    @Test
+    void acceptsAStartJustInsideFortyEightHours() {
+        User host = signIn();
+        Instant almost = Instant.now().plus(48, ChronoUnit.HOURS).minus(1, ChronoUnit.MINUTES);
+
+        post(host, valid(Map.of("startsAt", almost.toString()))).expectStatus().isCreated();
+    }
+
+    @Test
+    void rejectsAStartMoreThanFortyEightHoursAhead() {
+        User host = signIn();
+        Instant tooLate = Instant.now().plus(49, ChronoUnit.HOURS);
+
+        expectInvalid(post(host, valid(Map.of("startsAt", tooLate.toString()))), "startsAt", "TOO_FAR_AHEAD");
+    }
+
+    @Test
+    void acceptsADescriptionOfExactlyOneHundredFortyCharacters() {
+        User host = signIn();
+
+        post(host, valid(Map.of("description", "x".repeat(140)))).expectStatus().isCreated();
+    }
+
+    @Test
+    void rejectsADescriptionLongerThanOneHundredFortyCharacters() {
+        User host = signIn();
+
+        expectInvalid(post(host, valid(Map.of("description", "x".repeat(141)))), "description", "TOO_LONG");
+    }
+
+    @Test
+    void rejectsAMissingCategory() {
+        User host = signIn();
+        Map<String, Object> body = valid(Map.of());
+        body.remove("category");
+
+        expectInvalid(post(host, body), "category", "REQUIRED");
+    }
+
+    @Test
+    void rejectsAnUnknownCategory() {
+        User host = signIn();
+
+        expectInvalid(post(host, valid(Map.of("category", "party"))), "category", "UNKNOWN_CATEGORY");
+    }
+
+    @Test
+    void rejectsCoordinatesOutsideTheCampus() {
+        User host = signIn();
+        // Times Square: off campus on both axes.
+        Map<String, Object> body = valid(Map.of("latitude", 40.7580, "longitude", -73.9855));
+
+        post(host, body)
+                .expectStatus().isEqualTo(422)
+                .expectBody()
+                .jsonPath("$.code").isEqualTo("INVALID_EVENT")
+                .jsonPath("$.errors.length()").isEqualTo(2)
+                .jsonPath("$.errors[?(@.field == 'latitude' && @.code == 'OUTSIDE_CAMPUS')]").isNotEmpty()
+                .jsonPath("$.errors[?(@.field == 'longitude' && @.code == 'OUTSIDE_CAMPUS')]").isNotEmpty();
+        assertNoEvents();
+    }
+
+    @Test
+    void acceptsAPinOnTheCampusEdge() {
+        User host = signIn();
+
+        post(host, valid(Map.of("latitude", campus.south(), "longitude", campus.west()))).expectStatus().isCreated();
+    }
+
+    @Test
+    void reportsEveryMissingFieldAtOnce() {
+        User host = signIn();
+
+        var body = post(host, Map.of())
+                .expectStatus().isEqualTo(422)
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                .expectBody()
+                .jsonPath("$.code").isEqualTo("INVALID_EVENT")
+                .jsonPath("$.errors.length()").isEqualTo(7);
+        for (String field : List.of(
+                "title", "description", "locationLabel", "category", "startsAt", "latitude", "longitude")) {
+            body.jsonPath("$.errors[?(@.field == '" + field + "' && @.code == 'REQUIRED')]").isNotEmpty();
+        }
+        assertNoEvents();
+    }
+
+    private User signIn() {
+        return authService.signIn(new GoogleIdentity("sub-1", "ada@stevens.edu", true, "Ada", null));
+    }
+
+    private Map<String, Object> valid(Map<String, Object> overrides) {
+        Map<String, Object> body = new HashMap<>(Map.of(
+                "title", "CS102 study group",
+                "description", "Studying for CS102!",
+                "category", "study",
+                "latitude", 40.7440,
+                "longitude", -74.0255,
+                "locationLabel", "Library, 2nd floor",
+                "startsAt", Instant.now().plus(2, ChronoUnit.HOURS).toString()));
+        body.putAll(overrides);
+        return body;
+    }
+
+    private RestTestClient.ResponseSpec post(User host, Map<String, Object> body) {
+        return client.post().uri("/api/v1/events")
+                .header(HttpHeaders.COOKIE, "JSESSIONID=" + sessionFor(host))
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(body)
+                .exchange();
+    }
+
+    private void expectInvalid(RestTestClient.ResponseSpec response, String field, String code) {
+        response.expectStatus().isEqualTo(422)
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                .expectBody()
+                .jsonPath("$.code").isEqualTo("INVALID_EVENT")
+                .jsonPath("$.errors.length()").isEqualTo(1)
+                .jsonPath("$.errors[0].field").isEqualTo(field)
+                .jsonPath("$.errors[0].code").isEqualTo(code)
+                .jsonPath("$.errors[0].detail").isNotEmpty();
+        assertNoEvents();
+    }
+
+    private void assertNoEvents() {
+        assertThat(jdbc.queryForObject("select count(*) from events", Integer.class)).isZero();
     }
 
     private String sessionFor(User user) {

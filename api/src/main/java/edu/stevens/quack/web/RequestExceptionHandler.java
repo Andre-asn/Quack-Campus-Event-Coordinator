@@ -8,6 +8,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import edu.stevens.quack.event.InvalidEventException;
 import edu.stevens.quack.event.MapQueryException;
 
 @RestControllerAdvice
@@ -20,6 +21,16 @@ public class RequestExceptionHandler {
                 "MALFORMED_REQUEST",
                 "Malformed request",
                 "The request body is not valid JSON for this endpoint.");
+        return ResponseEntity.status(problem.getStatus())
+                .contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                .body(problem);
+    }
+
+    @ExceptionHandler(InvalidEventException.class)
+    ResponseEntity<ProblemDetail> invalidEvent(InvalidEventException ex) {
+        ProblemDetail problem = ApiProblems.of(
+                HttpStatus.UNPROCESSABLE_CONTENT, "INVALID_EVENT", "Invalid event", ex.getMessage());
+        problem.setProperty("errors", ex.errors());
         return ResponseEntity.status(problem.getStatus())
                 .contentType(MediaType.APPLICATION_PROBLEM_JSON)
                 .body(problem);

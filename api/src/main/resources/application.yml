@@ -37,6 +37,13 @@ quack:
       - stevens.edu
     # Expo Go returns through exp://, which a production build should turn off.
     allow-expo-go-redirects: ${QUACK_AUTH_ALLOW_EXPO_GO_REDIRECTS:true}
+  # Events must be pinned inside this box (degrees, edges included). It covers the Stevens
+  # campus in Hoboken and its dorms; widen it here, not in code.
+  campus:
+    west: -74.0310
+    south: 40.7385
+    east: -74.0200
+    north: 40.7490
 
 server:
   port: ${PORT:8080}
