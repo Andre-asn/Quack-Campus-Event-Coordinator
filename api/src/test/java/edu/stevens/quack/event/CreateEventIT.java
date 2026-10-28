@@ -162,9 +162,19 @@ class CreateEventIT extends PostgresIntegrationTest {
     }
 
     @Test
-    void rejectsAStartMoreThanFortyEightHoursAhead() {
+    void acceptsExactlyFortyEightHoursAhead() {
         User host = signIn();
-        Instant tooLate = Instant.now().plus(49, ChronoUnit.HOURS);
+        // The server's clock reads a little later than this one, so this is at most exactly 48h for it.
+        Instant limit = Instant.now().plus(48, ChronoUnit.HOURS);
+
+        post(host, valid(Map.of("startsAt", limit.toString()))).expectStatus().isCreated();
+    }
+
+    @Test
+    void rejectsJustBeyondFortyEightHours() {
+        User host = signIn();
+        // A minute, not a second, so the gap between this clock and the server's can't make it pass.
+        Instant tooLate = Instant.now().plus(48, ChronoUnit.HOURS).plus(1, ChronoUnit.MINUTES);
 
         expectInvalid(post(host, valid(Map.of("startsAt", tooLate.toString()))), "startsAt", "TOO_FAR_AHEAD");
     }
@@ -201,13 +211,6 @@ class CreateEventIT extends PostgresIntegrationTest {
         assertThat(row.get("description")).isEqualTo("x".repeat(140));
     }
 
-    @Test
-    void allowsAFewMinutesOfClockSkewPastFortyEightHours() {
-        User host = signIn();
-        Instant justPast = Instant.now().plus(48, ChronoUnit.HOURS).plus(1, ChronoUnit.MINUTES);
-
-        post(host, valid(Map.of("startsAt", justPast.toString()))).expectStatus().isCreated();
-    }
 
     @Test
     void rejectsAMissingCategory() {

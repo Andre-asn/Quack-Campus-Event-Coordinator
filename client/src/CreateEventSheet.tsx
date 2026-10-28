@@ -63,7 +63,8 @@ function nextRoundHour(): Date {
   return date;
 }
 
-const MAX_AHEAD_MS = 48 * 60 * 60 * 1000;
+// The server rejects anything past exactly 48 hours, so stop 5 minutes short in case this phone's clock runs ahead.
+const MAX_AHEAD_MS = (48 * 60 - 5) * 60 * 1000;
 
 // Events can start any time from now to 48 hours ahead.
 function clampStart(date: Date): Date {
