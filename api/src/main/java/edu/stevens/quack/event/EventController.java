@@ -8,6 +8,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -49,6 +50,12 @@ public class EventController {
             return ResponseEntity.status(HttpStatus.NOT_MODIFIED).eTag(result.etag()).build();
         }
         return ResponseEntity.ok().eTag(result.etag()).body(result.page());
+    }
+
+    // id and token stay strings: a value that is not a UUID names no event, so it is a 404 like any other miss.
+    @GetMapping("/{id}")
+    public EventDetail detail(@PathVariable String id, @RequestParam(required = false) String token) {
+        return events.detail(id, token);
     }
 
     private static boolean matches(String ifNoneMatch, String etag) {

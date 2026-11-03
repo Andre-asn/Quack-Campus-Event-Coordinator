@@ -8,6 +8,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import edu.stevens.quack.event.EventNotFoundException;
 import edu.stevens.quack.event.InvalidEventException;
 import edu.stevens.quack.event.MapQueryException;
 
@@ -31,6 +32,15 @@ public class RequestExceptionHandler {
         ProblemDetail problem = ApiProblems.of(
                 HttpStatus.UNPROCESSABLE_CONTENT, "INVALID_EVENT", "Invalid event", ex.getMessage());
         problem.setProperty("errors", ex.errors());
+        return ResponseEntity.status(problem.getStatus())
+                .contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                .body(problem);
+    }
+
+    @ExceptionHandler(EventNotFoundException.class)
+    ResponseEntity<ProblemDetail> eventNotFound(EventNotFoundException ex) {
+        ProblemDetail problem = ApiProblems.of(
+                HttpStatus.NOT_FOUND, "EVENT_NOT_FOUND", "Event not found", ex.getMessage());
         return ResponseEntity.status(problem.getStatus())
                 .contentType(MediaType.APPLICATION_PROBLEM_JSON)
                 .body(problem);

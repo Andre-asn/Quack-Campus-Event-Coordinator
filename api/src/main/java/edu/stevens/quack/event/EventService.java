@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import edu.stevens.quack.auth.CurrentUser;
 import edu.stevens.quack.user.User;
+import edu.stevens.quack.user.UserRepository;
 
 @Service
 public class EventService {
@@ -38,6 +39,7 @@ public class EventService {
     private static final Duration CLOCK_SKEW = Duration.ofMinutes(5);
 
     private final EventRepository events;
+    private final UserRepository users;
     private final MapEventQuery mapEvents;
     private final CurrentUser currentUser;
     private final Clock clock;
@@ -45,11 +47,13 @@ public class EventService {
 
     public EventService(
             EventRepository events,
+            UserRepository users,
             MapEventQuery mapEvents,
             CurrentUser currentUser,
             Clock clock,
             CampusProperties campus) {
         this.events = events;
+        this.users = users;
         this.mapEvents = mapEvents;
         this.currentUser = currentUser;
         this.clock = clock;
@@ -138,6 +142,58 @@ public class EventService {
 
     private static InvalidEventException.InvalidField invalid(String field, String code, String detail) {
         return new InvalidEventException.InvalidField(field, code, detail);
+    }
+
+    // Cancelled events are returned with their status, not hidden. A link-only event needs its share token,
+    // even for the host; anything else, including a tampered or malformed token, is a 404.
+    @Transactional(readOnly = true)
+    public EventDetail detail(String idText, String token) {
+        currentUser.require();
+        UUID id = uuidOrNull(idText);
+        if (id == null) {
+            throw new EventNotFoundException();
+        }
+        Event event = events.findById(id).orElseThrow(EventNotFoundException::new);
+        if ("link_only".equals(event.getVisibility()) && !opens(event, token)) {
+            throw new EventNotFoundException();
+        }
+        User host = users.findById(event.getHostId()).orElseThrow(EventNotFoundException::new);
+        // Shortcut until #70 merges: no event_attendance table on this branch yet, so the count is fixed at 0.
+        // Replace with a count query on event_attendance once the attendance migration lands.
+        long attendeeCount = 0;
+        return new EventDetail(
+                event.getId(),
+                event.getTitle(),
+                event.getDescription(),
+                event.getCategory(),
+                event.getLocationLabel(),
+                event.getStartsAt(),
+                event.getStatus(),
+                new EventDetail.Host(host.getDisplayName(), host.getAvatarUrl()),
+                attendeeCount);
+    }
+
+    private static boolean opens(Event event, String token) {
+        UUID given = uuidOrNull(token);
+        if (given == null || event.getShareToken() == null) {
+            return false;
+        }
+        return MessageDigest.isEqual(
+                event.getShareToken().toString().getBytes(StandardCharsets.US_ASCII),
+                given.toString().getBytes(StandardCharsets.US_ASCII));
+    }
+
+    private static UUID uuidOrNull(String text) {
+        if (text == null || text.isBlank()) {
+            return null;
+        }
+        try {
+            UUID parsed = UUID.fromString(text.trim());
+            // UUID.fromString accepts short groups like "1-1-1-1-1"; only the canonical form names an event.
+            return parsed.toString().equalsIgnoreCase(text.trim()) ? parsed : null;
+        } catch (IllegalArgumentException ex) {
+            return null;
+        }
     }
 
     @Transactional(readOnly = true)
