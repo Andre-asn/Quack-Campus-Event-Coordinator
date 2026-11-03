@@ -119,14 +119,20 @@ function QuackApp() {
 
   return (
     <View style={styles.home}>
-      <CampusMap
-        bottomInset={sheetInset}
-        // While pinning a new event, taps on other events stay on the create sheet.
-        onOpenEvent={creating ? undefined : setOpenEventId}
-        onPinMoved={creating ? setPinned : undefined}
-        refreshKey={mapRefresh}
-        sessionId={screen.session.sessionId}
-      />
+      {/* accessibilityViewIsModal on the sheet is iOS-only, so TalkBack needs the map hidden explicitly. */}
+      <View
+        importantForAccessibility={openEventId ? 'no-hide-descendants' : 'auto'}
+        style={StyleSheet.absoluteFill}
+      >
+        <CampusMap
+          bottomInset={sheetInset}
+          // While pinning a new event, taps on other events stay on the create sheet.
+          onOpenEvent={creating ? undefined : setOpenEventId}
+          onPinMoved={creating ? setPinned : undefined}
+          refreshKey={mapRefresh}
+          sessionId={screen.session.sessionId}
+        />
+      </View>
       {openEventId ? (
         // No bottom inset: the camera stays put, so closing returns to the same view.
         <EventDetailSheet

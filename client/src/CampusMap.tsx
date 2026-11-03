@@ -207,7 +207,7 @@ export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, 
             coordinate={[spot.longitude, spot.latitude]}
           >
             <SpotBubble
-              onOpen={(id) => onOpenEvent?.(id)}
+              onOpen={onOpenEvent}
               onShowAll={() => setShowAll(spot)}
               spot={spot}
             />
@@ -231,10 +231,10 @@ export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, 
         closeLabel="Close show all"
         events={showAll?.events ?? []}
         onClose={() => setShowAll(null)}
-        onOpen={(id) => {
+        onOpen={onOpenEvent && ((id) => {
           setShowAll(null);
-          onOpenEvent?.(id);
-        }}
+          onOpenEvent(id);
+        })}
         title="Show all"
         visible={showAll !== null}
       />
@@ -242,10 +242,10 @@ export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, 
         closeLabel="Close events in this view"
         events={events}
         onClose={() => setViewList(false)}
-        onOpen={(id) => {
+        onOpen={onOpenEvent && ((id) => {
           setViewList(false);
-          onOpenEvent?.(id);
-        }}
+          onOpenEvent(id);
+        })}
         title="Events in this view"
         visible={viewList}
       />
@@ -260,7 +260,8 @@ function SpotBubble({
   onShowAll,
 }: {
   spot: Spot;
-  onOpen: (eventId: string) => void;
+  // Absent while pinning a new event; a bubble then opens Show all, as before the detail sheet.
+  onOpen?: (eventId: string) => void;
   onShowAll: () => void;
 }) {
   const visible = spot.events.slice(0, 3);
@@ -269,11 +270,11 @@ function SpotBubble({
     <View style={styles.bubbles}>
       {visible.map((event, index) => (
         <Pressable
-          accessibilityHint="Opens event details"
+          accessibilityHint={onOpen ? 'Opens event details' : 'Shows the events here'}
           accessibilityLabel={`${event.title}, hosted by ${event.host.displayName}`}
           accessibilityRole="button"
           key={event.id}
-          onPress={() => onOpen(event.id)}
+          onPress={onOpen ? () => onOpen(event.id) : onShowAll}
         >
           <Avatar event={event} overlap={index > 0} />
         </Pressable>
@@ -317,7 +318,8 @@ function EventList({
   visible: boolean;
   closeLabel: string;
   onClose: () => void;
-  onOpen: (eventId: string) => void;
+  // Absent while pinning a new event; rows are then plain text.
+  onOpen?: (eventId: string) => void;
 }) {
   return (
     <Modal animationType="slide" onRequestClose={onClose} transparent visible={visible}>
@@ -328,21 +330,31 @@ function EventList({
             data={events}
             keyExtractor={(event) => event.id}
             ListEmptyComponent={<Text style={styles.rowMeta}>No events in this view</Text>}
-            renderItem={({ item }) => (
-              <Pressable
-                accessibilityHint="Opens event details"
-                accessibilityLabel={`${item.title}, hosted by ${item.host.displayName}`}
-                accessibilityRole="button"
-                onPress={() => onOpen(item.id)}
-                style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-              >
-                <Avatar event={item} />
-                <View style={styles.rowText}>
-                  <Text style={styles.rowTitle}>{item.title}</Text>
-                  <Text style={styles.rowMeta}>{item.host.displayName}</Text>
-                </View>
-              </Pressable>
-            )}
+            renderItem={({ item }) => {
+              const content = (
+                <>
+                  <Avatar event={item} />
+                  <View style={styles.rowText}>
+                    <Text style={styles.rowTitle}>{item.title}</Text>
+                    <Text style={styles.rowMeta}>{item.host.displayName}</Text>
+                  </View>
+                </>
+              );
+              if (!onOpen) {
+                return <View style={styles.row}>{content}</View>;
+              }
+              return (
+                <Pressable
+                  accessibilityHint="Opens event details"
+                  accessibilityLabel={`${item.title}, hosted by ${item.host.displayName}`}
+                  accessibilityRole="button"
+                  onPress={() => onOpen(item.id)}
+                  style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+                >
+                  {content}
+                </Pressable>
+              );
+            }}
           />
           <Pressable accessibilityLabel={closeLabel} accessibilityRole="button" onPress={onClose} style={styles.close}>
             <Text style={styles.closeText}>Close</Text>
