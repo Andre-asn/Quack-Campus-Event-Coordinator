@@ -16,6 +16,8 @@ export const colors = {
   inputLine: '#CFC6BC',
   redTint: '#F7DDE2',
   redDeep: '#7A1528',
+  divider: '#ECE5DC',
+  avatar: '#3D5A80',
 };
 
 // Bricolage Grotesque is loaded in App.tsx. Body text uses the platform font.

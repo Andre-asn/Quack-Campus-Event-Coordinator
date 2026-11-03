@@ -12,6 +12,7 @@ import {
 import AddIcon from './assets/create/add.svg';
 import CampusMap, { type PinnedPlace } from './src/CampusMap';
 import CreateEventSheet from './src/CreateEventSheet';
+import EventDetailSheet from './src/EventDetailSheet';
 import LoadingScreen from './src/LoadingScreen';
 import SignInScreen, { type SignInError } from './src/SignInScreen';
 import { restoreSession, signInWithGoogle, signOut } from './src/auth';
@@ -40,6 +41,7 @@ function QuackApp() {
   const [sheetInset, setSheetInset] = useState(0);
   const [pinned, setPinned] = useState<PinnedPlace | null>(null);
   const [mapRefresh, setMapRefresh] = useState(0);
+  const [openEventId, setOpenEventId] = useState<string | null>(null);
   const [fontsLoaded, fontError] = useFonts({
     BricolageGrotesque_600SemiBold,
     BricolageGrotesque_700Bold,
@@ -119,11 +121,21 @@ function QuackApp() {
     <View style={styles.home}>
       <CampusMap
         bottomInset={sheetInset}
+        // While pinning a new event, taps on other events stay on the create sheet.
+        onOpenEvent={creating ? undefined : setOpenEventId}
         onPinMoved={creating ? setPinned : undefined}
         refreshKey={mapRefresh}
         sessionId={screen.session.sessionId}
       />
-      {creating ? (
+      {openEventId ? (
+        // No bottom inset: the camera stays put, so closing returns to the same view.
+        <EventDetailSheet
+          eventId={openEventId}
+          key={openEventId}
+          onClose={() => setOpenEventId(null)}
+          sessionId={screen.session.sessionId}
+        />
+      ) : creating ? (
         <CreateEventSheet
           onClose={closeCreate}
           onInset={setSheetInset}
@@ -146,7 +158,7 @@ function QuackApp() {
         </Pressable>
       )}
       {/* Clears the status bar, notch, or Dynamic Island while the map stays full-screen. */}
-      <View pointerEvents="box-none" style={[styles.overlay, creating && styles.hidden, { paddingTop: insets.top + 12 }]}>
+      <View pointerEvents="box-none" style={[styles.overlay, (creating || openEventId !== null) && styles.hidden,{ paddingTop: insets.top + 12 }]}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`Sign out ${screen.session.user.email}`}

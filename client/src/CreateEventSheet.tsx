@@ -36,6 +36,7 @@ import PlaceIcon from '../assets/create/place.svg';
 import type { PinnedPlace } from './CampusMap';
 import { createEvent, type FieldErrors } from './events';
 import { colors, fonts } from './theme';
+import { formatWhen } from './when';
 
 const categories = ['study', 'food', 'sports', 'games', 'movie', 'music', 'other'] as const;
 type Category = (typeof categories)[number];
@@ -70,14 +71,6 @@ const MAX_AHEAD_MS = (48 * 60 - 5) * 60 * 1000;
 function clampStart(date: Date): Date {
   const now = Date.now();
   return new Date(Math.min(Math.max(date.getTime(), now), now + MAX_AHEAD_MS));
-}
-
-function formatWhen(date: Date): string {
-  const midnight = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const days = Math.round((midnight(date) - midnight(new Date())) / 86_400_000);
-  // 48 hours can reach the day after tomorrow, which reads best by name.
-  const day = days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : date.toLocaleDateString([], { weekday: 'long' });
-  return `${day}, ${date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
 }
 
 // Android shows the date, then the time, as two system dialogs.
