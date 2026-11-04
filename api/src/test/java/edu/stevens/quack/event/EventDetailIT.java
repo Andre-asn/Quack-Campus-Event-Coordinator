@@ -29,6 +29,7 @@ import edu.stevens.quack.user.UserRepository;
 class EventDetailIT extends PostgresIntegrationTest {
 
     private static final Instant STARTS_AT = Instant.now().plus(2, ChronoUnit.HOURS).truncatedTo(ChronoUnit.MICROS);
+    private static final Instant ENDS_AT = STARTS_AT.plus(2, ChronoUnit.HOURS);
 
     @Autowired
     RestTestClient client;
@@ -51,6 +52,7 @@ class EventDetailIT extends PostgresIntegrationTest {
     @BeforeEach
     @AfterEach
     void clean() {
+        jdbc.update("delete from event_attendance");
         jdbc.update("delete from events");
         users.deleteAll();
     }
@@ -79,6 +81,7 @@ class EventDetailIT extends PostgresIntegrationTest {
                 .jsonPath("$.host.displayName").isEqualTo("ada")
                 .jsonPath("$.host.avatarUrl").isEqualTo("https://example.test/ada.png")
                 .jsonPath("$.startsAt").isEqualTo(STARTS_AT.toString())
+                .jsonPath("$.endsAt").isEqualTo(ENDS_AT.toString())
                 .jsonPath("$.locationLabel").isEqualTo("Library, 2nd floor")
                 .jsonPath("$.category").isEqualTo("study")
                 .jsonPath("$.description").isEqualTo("Studying for CS102!")
@@ -102,7 +105,7 @@ class EventDetailIT extends PostgresIntegrationTest {
         assertThat(body).isNotNull().doesNotContain(token.toString());
         Map<String, Object> json = JsonPath.read(body, "$");
         assertThat(json).containsOnlyKeys(
-                "id", "title", "description", "category", "locationLabel", "startsAt", "status", "host",
+                "id", "title", "description", "category", "locationLabel", "startsAt", "endsAt", "status", "host",
                 "attendeeCount");
         Map<String, Object> host = JsonPath.read(body, "$.host");
         assertThat(host).containsOnlyKeys("displayName", "avatarUrl");
@@ -235,6 +238,7 @@ class EventDetailIT extends PostgresIntegrationTest {
                 -74.025,
                 "Library, 2nd floor",
                 STARTS_AT,
+                ENDS_AT,
                 Instant.parse("2026-10-21T12:00:00Z")));
     }
 
