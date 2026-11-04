@@ -90,7 +90,8 @@ public class EventController {
             Double latitude,
             Double longitude,
             String locationLabel,
-            Instant startsAt) {
+            Instant startsAt,
+            Instant endsAt) {
     }
 
     public record EventResponse(
@@ -105,7 +106,8 @@ public class EventController {
             Instant startsAt,
             String visibility,
             String status,
-            Instant createdAt) {
+            Instant createdAt,
+            Instant endsAt) {
 
         static EventResponse from(Event event) {
             return new EventResponse(
@@ -120,7 +122,8 @@ public class EventController {
                     event.getStartsAt(),
                     event.getVisibility(),
                     event.getStatus(),
-                    event.getCreatedAt());
+                    event.getCreatedAt(),
+                    event.getEndsAt());
         }
     }
 }

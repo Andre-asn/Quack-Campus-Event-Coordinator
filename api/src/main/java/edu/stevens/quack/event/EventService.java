@@ -40,6 +40,7 @@ public class EventService {
 
     private final EventRepository events;
     private final UserRepository users;
+    private final AttendanceRepository attendance;
     private final MapEventQuery mapEvents;
     private final CurrentUser currentUser;
     private final Clock clock;
@@ -48,12 +49,14 @@ public class EventService {
     public EventService(
             EventRepository events,
             UserRepository users,
+            AttendanceRepository attendance,
             MapEventQuery mapEvents,
             CurrentUser currentUser,
             Clock clock,
             CampusProperties campus) {
         this.events = events;
         this.users = users;
+        this.attendance = attendance;
         this.mapEvents = mapEvents;
         this.currentUser = currentUser;
         this.clock = clock;
@@ -71,7 +74,8 @@ public class EventService {
                 request.latitude(),
                 request.longitude(),
                 strip(request.locationLabel()),
-                request.startsAt() == null ? null : request.startsAt().truncatedTo(ChronoUnit.MICROS));
+                request.startsAt() == null ? null : request.startsAt().truncatedTo(ChronoUnit.MICROS),
+                request.endsAt() == null ? null : request.endsAt().truncatedTo(ChronoUnit.MICROS));
         validate(clean);
         Event event = Event.create(
                 UUID.randomUUID(),
@@ -83,6 +87,7 @@ public class EventService {
                 clean.longitude(),
                 clean.locationLabel(),
                 clean.startsAt(),
+                clean.endsAt(),
                 clock.instant().truncatedTo(ChronoUnit.MICROS));
         return events.save(event);
     }
@@ -111,6 +116,12 @@ public class EventService {
             errors.add(invalid("startsAt", "IN_PAST", "Start time can't be in the past."));
         } else if (request.startsAt().isAfter(clock.instant().plus(MAX_AHEAD))) {
             errors.add(invalid("startsAt", "TOO_FAR_AHEAD", "Start time must be at most 48 hours ahead."));
+        }
+
+        if (request.endsAt() == null) {
+            errors.add(invalid("endsAt", "REQUIRED", "End time is required."));
+        } else if (request.startsAt() != null && !request.startsAt().isBefore(request.endsAt())) {
+            errors.add(invalid("endsAt", "NOT_AFTER_START", "End time must be after start time."));
         }
 
         if (request.latitude() == null) {
@@ -158,9 +169,6 @@ public class EventService {
             throw new EventNotFoundException();
         }
         User host = users.findById(event.getHostId()).orElseThrow(EventNotFoundException::new);
-        // Shortcut until #70 merges: no event_attendance table on this branch yet, so the count is fixed at 0.
-        // Replace with a count query on event_attendance once the attendance migration lands.
-        long attendeeCount = 0;
         return new EventDetail(
                 event.getId(),
                 event.getTitle(),
@@ -168,9 +176,10 @@ public class EventService {
                 event.getCategory(),
                 event.getLocationLabel(),
                 event.getStartsAt(),
+                event.getEndsAt(),
                 event.getStatus(),
                 new EventDetail.Host(host.getDisplayName(), host.getAvatarUrl()),
-                attendeeCount);
+                attendance.countByEventId(event.getId()));
     }
 
     private static boolean opens(Event event, String token) {

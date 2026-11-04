@@ -8,6 +8,7 @@ export type NewEvent = {
   longitude: number;
   locationLabel: string;
   startsAt: string;
+  endsAt: string;
 };
 
 // Server field name to its message, from the 422 INVALID_EVENT `errors` list.

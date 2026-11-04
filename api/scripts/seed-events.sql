@@ -46,15 +46,16 @@ WITH locations (idx, label, lat, lon) AS (
     JOIN locations l ON l.idx = ((n-1)/7)%7
 )
 INSERT INTO events (id, host_id, title, description, category, location,
-                    location_label, starts_at, visibility, status, created_at, updated_at)
+                    location_label, starts_at, ends_at, visibility, status, created_at, updated_at)
 SELECT md5('quack-45-event-' || n)::uuid,
        md5('quack-45-user-' || (1+(n-1)%20))::uuid,
        title || ' #' || n, 'Demo event: ' || title || '. Everyone is welcome!',
        category, ST_SetSRID(ST_MakePoint(lon, lat),4326)::geography,
-       label, starts, 'public', 'active', starts - interval '1 day', now()
+       label, starts, starts + interval '2 hours', 'public', 'active', starts - interval '1 day', now()
 FROM data
 ON CONFLICT (id) DO UPDATE SET
     title = excluded.title, description = excluded.description,
     category = excluded.category, location = excluded.location,
     location_label = excluded.location_label, starts_at = excluded.starts_at,
+    ends_at = excluded.ends_at,
     visibility = excluded.visibility, status = excluded.status, updated_at = excluded.updated_at;

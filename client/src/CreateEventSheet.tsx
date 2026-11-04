@@ -73,6 +73,10 @@ function clampStart(date: Date): Date {
   return new Date(Math.min(Math.max(date.getTime(), now), now + MAX_AHEAD_MS));
 }
 
+function clampEnd(date: Date, startsAt: Date): Date {
+  return new Date(Math.max(date.getTime(), startsAt.getTime() + 60_000));
+}
+
 // Android shows the date, then the time, as two system dialogs.
 function pickOnAndroid(current: Date, onPick: (date: Date) => void) {
   DateTimePickerAndroid.open({
@@ -92,6 +96,21 @@ function pickOnAndroid(current: Date, onPick: (date: Date) => void) {
   });
 }
 
+function pickEndOnAndroid(current: Date, startsAt: Date, onPick: (date: Date) => void) {
+  DateTimePickerAndroid.open({
+    value: current,
+    mode: 'date',
+    minimumDate: startsAt,
+    onValueChange: (_, date) => {
+      DateTimePickerAndroid.open({
+        value: date,
+        mode: 'time',
+        onValueChange: (__, time) => onPick(clampEnd(time, startsAt)),
+      });
+    },
+  });
+}
+
 type Props = {
   sessionId: string;
   place: PinnedPlace | null;
@@ -104,6 +123,7 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
   const insets = useSafeAreaInsets();
   const descriptionRef = useRef<TextInput>(null);
   const [startsAt, setStartsAt] = useState(nextRoundHour);
+  const [endsAt, setEndsAt] = useState(() => new Date(nextRoundHour().getTime() + 2 * 60 * 60 * 1000));
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState<Category | null>(null);
@@ -211,13 +231,15 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
   const label = typedLabel ?? suggestedLabel;
   const ready = Boolean(title.trim() && description.trim() && category && label.trim() && place) && !busy;
   const when = formatWhen(startsAt);
+  const until = formatWhen(endsAt);
   // The pin has no input of its own, so its errors show under "Where exactly?".
   const pinError = place === rejectedPlace
     ? fieldErrors.location ?? fieldErrors.latitude ?? fieldErrors.longitude
     : undefined;
   const whereError = fieldErrors.locationLabel ?? pinError;
   const anyFieldShown = Boolean(
-    fieldErrors.title || fieldErrors.description || fieldErrors.category || fieldErrors.startsAt || whereError,
+    fieldErrors.title || fieldErrors.description || fieldErrors.category || fieldErrors.startsAt
+      || fieldErrors.endsAt || whereError,
   );
   // E.g. the pin moved while posting: its error no longer shows, so the banner explains the failure.
   const banner = error && (!errorHasFields || (Object.keys(fieldErrors).length > 0 && !anyFieldShown))
@@ -247,6 +269,7 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
       longitude: place.longitude,
       locationLabel: label.trim(),
       startsAt: startsAt.toISOString(),
+      endsAt: endsAt.toISOString(),
     });
     if (outcome.ok) {
       AccessibilityInfo.announceForAccessibility('Event posted');
@@ -428,7 +451,11 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
                     minimumDate={new Date()}
                     mode="datetime"
                     onValueChange={(_, date) => {
-                      setStartsAt(clampStart(date));
+                      const nextStart = clampStart(date);
+                      setStartsAt(nextStart);
+                      if (endsAt.getTime() <= nextStart.getTime()) {
+                        setEndsAt(new Date(nextStart.getTime() + 60_000));
+                      }
                       clearErrors('startsAt');
                     }}
                     value={startsAt}
@@ -443,12 +470,51 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
                   disabled={busy}
                   onPress={() => pickOnAndroid(startsAt, (date) => {
                     setStartsAt(date);
+                    if (endsAt.getTime() <= date.getTime()) {
+                      setEndsAt(new Date(date.getTime() + 60_000));
+                    }
                     clearErrors('startsAt');
                   })}
                   style={({ pressed }) => [styles.input, styles.inputRow, pressed && styles.pressed]}
                 >
                   <ClockIcon height={20} width={20} />
                   <Text style={styles.inputText}>{when}</Text>
+                </Pressable>
+              )}
+            </Field>
+
+            <Field error={fieldErrors.endsAt} help="Choose when the event ends." label="Ends">
+              {Platform.OS === 'ios' ? (
+                <View style={[styles.input, styles.inputRow, styles.iosWhen]}>
+                  <ClockIcon height={20} width={20} />
+                  <DateTimePicker
+                    accessibilityLabel={`Ends: ${until}`}
+                    disabled={busy}
+                    display="compact"
+                    minimumDate={new Date(startsAt.getTime() + 60_000)}
+                    mode="datetime"
+                    onValueChange={(_, date) => {
+                      setEndsAt(clampEnd(date, startsAt));
+                      clearErrors('endsAt');
+                    }}
+                    value={endsAt}
+                  />
+                </View>
+              ) : (
+                <Pressable
+                  accessibilityHint="Opens an end date and time picker"
+                  accessibilityLabel={`Ends: ${until}`}
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: busy }}
+                  disabled={busy}
+                  onPress={() => pickEndOnAndroid(endsAt, startsAt, (date) => {
+                    setEndsAt(date);
+                    clearErrors('endsAt');
+                  })}
+                  style={({ pressed }) => [styles.input, styles.inputRow, pressed && styles.pressed]}
+                >
+                  <ClockIcon height={20} width={20} />
+                  <Text style={styles.inputText}>{until}</Text>
                 </Pressable>
               )}
             </Field>

@@ -12,6 +12,7 @@ public record EventDetail(
         String category,
         String locationLabel,
         Instant startsAt,
+        Instant endsAt,
         String status,
         Host host,
         long attendeeCount) {
