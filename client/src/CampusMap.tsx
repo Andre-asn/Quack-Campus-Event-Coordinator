@@ -113,7 +113,7 @@ export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, 
     }
     const controller = new AbortController();
     let cancelled = false;
-    setEvents([]);
+    // Keep the current pins until the new set arrives; clearing first made them flash on every pan.
     setLoadError(false);
     setShowAll(null);
     setViewList(false);
