@@ -32,6 +32,9 @@ public class AttendanceService {
     /**
      * Records attendance once per student. Link-only events require their
      * share token; inaccessible events use the same response as missing events.
+     *
+     * @param eventId event to join
+     * @param token optional share token for link-only events
      */
     @Transactional
     public void join(UUID eventId, String token) {

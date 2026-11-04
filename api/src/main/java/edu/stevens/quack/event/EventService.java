@@ -141,7 +141,13 @@ public class EventService {
         }
     }
 
-    /** Returns event details only when the event is visible to the authenticated caller. */
+    /**
+     * Returns event details only when the event is visible to the authenticated caller.
+     *
+     * @param idText event identifier
+     * @param token optional share token for link-only events
+     * @return the event detail payload
+     */
     @Transactional(readOnly = true)
     public EventDetail detail(String idText, String token) {
         currentUser.require();

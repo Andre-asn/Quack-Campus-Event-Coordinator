@@ -3,6 +3,8 @@ package edu.stevens.quack.event;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Instant;
+import java.time.Clock;
+import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.Map;
 import java.util.UUID;
@@ -11,6 +13,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -25,7 +30,19 @@ import edu.stevens.quack.user.User;
 import edu.stevens.quack.user.UserRepository;
 
 @AutoConfigureRestTestClient
+@Import(AttendanceIT.FixedClockConfig.class)
 class AttendanceIT extends PostgresIntegrationTest {
+
+    private static final Instant TEST_NOW = Instant.parse("2026-11-04T17:00:00Z");
+
+    @TestConfiguration
+    static class FixedClockConfig {
+        @Bean
+        @org.springframework.context.annotation.Primary
+        Clock testClock() {
+            return Clock.fixed(TEST_NOW, ZoneOffset.UTC);
+        }
+    }
 
     @Autowired
     RestTestClient client;
@@ -103,7 +120,9 @@ class AttendanceIT extends PostgresIntegrationTest {
     @Test
     void rejectsJoinsAtTheEndBoundary() {
         UUID eventId = createEvent(user("host"));
-        jdbc.update("update events set ends_at = ? where id = ?", Instant.now(), eventId);
+        jdbc.update("update events set starts_at = ?, ends_at = ? where id = ?",
+                java.sql.Timestamp.from(TEST_NOW.minusNanos(1_000_000)),
+                java.sql.Timestamp.from(TEST_NOW), eventId);
 
         join(eventId, sessionFor(user("student")))
                 .expectStatus().isEqualTo(409)
