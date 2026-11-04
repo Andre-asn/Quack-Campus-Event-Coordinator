@@ -59,7 +59,8 @@ export async function loadMapEvents(
   if (cached?.url === url) {
     headers['If-None-Match'] = cached.etag;
   }
-  const response = await fetch(url, { headers, signal });
+  // The session goes in our own Cookie header; see the note in auth.ts.
+  const response = await fetch(url, { credentials: 'omit', headers, signal });
   if (response.status === 304 && cached?.url === url) {
     return { events: cached.events, unchanged: false };
   }
@@ -74,6 +75,7 @@ export async function loadMapEvents(
   while (cursor && extraPages < maxExtraPages) {
     extraPages += 1;
     const next = await fetch(`${url}&cursor=${encodeURIComponent(cursor)}`, {
+      credentials: 'omit',
       headers: { Accept: 'application/json', Cookie: headers.Cookie },
       signal,
     });

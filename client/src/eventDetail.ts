@@ -26,6 +26,8 @@ export async function loadEventDetail(
   signal?: AbortSignal,
 ): Promise<DetailResult> {
   const response = await fetch(`${apiBaseUrl}/api/v1/events/${encodeURIComponent(id)}`, {
+    // The session goes in our own Cookie header; see the note in auth.ts.
+    credentials: 'omit',
     headers: {
       Accept: 'application/json',
       Cookie: `${sessionCookieName}=${sessionId}`,

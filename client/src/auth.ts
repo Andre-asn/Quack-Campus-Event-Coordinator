@@ -52,6 +52,9 @@ export async function signInWithGoogle(): Promise<SignInResult> {
     return { type: 'error', code: 'SIGN_IN_FAILED' };
   }
   const response = await fetch(`${apiBaseUrl}/api/v1/auth/session`, {
+    // The app sends the session id itself. With the platform cookie jar on, iOS keeps this response's
+    // Set-Cookie and joins it onto our Cookie header ("JSESSIONID=x,JSESSIONID=x"), which the API rejects.
+    credentials: 'omit',
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
     body: JSON.stringify({ handoff }),
@@ -68,6 +71,7 @@ export async function signInWithGoogle(): Promise<SignInResult> {
 export async function signOut(sessionId: string): Promise<'signed-out' | 'failed'> {
   try {
     const response = await fetch(`${apiBaseUrl}/api/v1/auth/logout`, {
+      credentials: 'omit',
       method: 'POST',
       headers: { Cookie: `${sessionCookieName}=${sessionId}` },
     });
@@ -89,6 +93,7 @@ export async function signOut(sessionId: string): Promise<'signed-out' | 'failed
 async function fetchCurrentUser(sessionId: string): Promise<CurrentUser | 'unauthorized' | 'unavailable'> {
   try {
     const response = await fetch(`${apiBaseUrl}/api/v1/me`, {
+      credentials: 'omit',
       headers: {
         Accept: 'application/json',
         Cookie: `${sessionCookieName}=${sessionId}`,
