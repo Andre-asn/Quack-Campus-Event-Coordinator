@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import edu.stevens.quack.auth.CurrentUser;
 import edu.stevens.quack.user.User;
+import edu.stevens.quack.user.UserRepository;
 
 @Service
 public class EventService {
@@ -38,6 +39,8 @@ public class EventService {
     private static final Duration CLOCK_SKEW = Duration.ofMinutes(5);
 
     private final EventRepository events;
+    private final UserRepository users;
+    private final AttendanceRepository attendance;
     private final MapEventQuery mapEvents;
     private final CurrentUser currentUser;
     private final Clock clock;
@@ -45,11 +48,15 @@ public class EventService {
 
     public EventService(
             EventRepository events,
+            UserRepository users,
+            AttendanceRepository attendance,
             MapEventQuery mapEvents,
             CurrentUser currentUser,
             Clock clock,
             CampusProperties campus) {
         this.events = events;
+        this.users = users;
+        this.attendance = attendance;
         this.mapEvents = mapEvents;
         this.currentUser = currentUser;
         this.clock = clock;
@@ -67,7 +74,8 @@ public class EventService {
                 request.latitude(),
                 request.longitude(),
                 strip(request.locationLabel()),
-                request.startsAt() == null ? null : request.startsAt().truncatedTo(ChronoUnit.MICROS));
+                request.startsAt() == null ? null : request.startsAt().truncatedTo(ChronoUnit.MICROS),
+                request.endsAt() == null ? null : request.endsAt().truncatedTo(ChronoUnit.MICROS));
         validate(clean);
         Event event = Event.create(
                 UUID.randomUUID(),
@@ -79,6 +87,7 @@ public class EventService {
                 clean.longitude(),
                 clean.locationLabel(),
                 clean.startsAt(),
+                clean.endsAt(),
                 clock.instant().truncatedTo(ChronoUnit.MICROS));
         return events.save(event);
     }
@@ -109,6 +118,12 @@ public class EventService {
             errors.add(invalid("startsAt", "TOO_FAR_AHEAD", "Start time must be at most 48 hours ahead."));
         }
 
+        if (request.endsAt() == null) {
+            errors.add(invalid("endsAt", "REQUIRED", "End time is required."));
+        } else if (request.startsAt() != null && !request.startsAt().isBefore(request.endsAt())) {
+            errors.add(invalid("endsAt", "NOT_AFTER_START", "End time must be after start time."));
+        }
+
         if (request.latitude() == null) {
             errors.add(invalid("latitude", "REQUIRED", "Latitude is required."));
         }
@@ -124,6 +139,49 @@ public class EventService {
         if (!errors.isEmpty()) {
             throw new InvalidEventException(errors);
         }
+    }
+
+    /** Returns event details only when the event is visible to the authenticated caller. */
+    @Transactional(readOnly = true)
+    public EventDetail detail(String idText, String token) {
+        currentUser.require();
+        UUID id = uuidOrNull(idText);
+        if (id == null) {
+            throw new EventNotFoundException();
+        }
+        Event event = events.findById(id).orElseThrow(EventNotFoundException::new);
+        if ("link_only".equals(event.getVisibility()) && !matchesToken(event.getShareToken(), token)) {
+            throw new EventNotFoundException();
+        }
+        User host = users.findById(event.getHostId()).orElseThrow(EventNotFoundException::new);
+        return new EventDetail(
+                event.getId(),
+                event.getTitle(),
+                event.getDescription(),
+                event.getCategory(),
+                event.getLocationLabel(),
+                event.getStartsAt(),
+                event.getEndsAt(),
+                event.getStatus(),
+                new EventDetail.Host(host.getDisplayName(), host.getAvatarUrl()),
+                attendance.countByEventId(event.getId()));
+    }
+
+    private static UUID uuidOrNull(String text) {
+        if (text == null || text.isBlank()) {
+            return null;
+        }
+        try {
+            UUID parsed = UUID.fromString(text.trim());
+            return parsed.toString().equalsIgnoreCase(text.trim()) ? parsed : null;
+        } catch (IllegalArgumentException ex) {
+            return null;
+        }
+    }
+
+    private static boolean matchesToken(UUID expected, String supplied) {
+        UUID parsed = uuidOrNull(supplied);
+        return expected != null && parsed != null && expected.equals(parsed);
     }
 
     private static void text(

@@ -254,6 +254,7 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
       longitude: place.longitude,
       locationLabel: label.trim(),
       startsAt: startsAt.toISOString(),
+      endsAt: new Date(startsAt.getTime() + 2 * 60 * 60 * 1000).toISOString(),
     });
     if (outcome.ok) {
       AccessibilityInfo.announceForAccessibility('Event posted');

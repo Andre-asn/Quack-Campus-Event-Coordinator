@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import edu.stevens.quack.event.InvalidEventException;
 import edu.stevens.quack.event.MapQueryException;
+import edu.stevens.quack.event.EventNotFoundException;
 
 @RestControllerAdvice
 public class RequestExceptionHandler {
@@ -41,6 +42,15 @@ public class RequestExceptionHandler {
         HttpStatus status = ex.status();
         String title = status == HttpStatus.BAD_REQUEST ? "Malformed request" : "Invalid map query";
         ProblemDetail problem = ApiProblems.of(status, ex.code(), title, ex.getMessage());
+        return ResponseEntity.status(problem.getStatus())
+                .contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                .body(problem);
+    }
+
+    @ExceptionHandler(EventNotFoundException.class)
+    ResponseEntity<ProblemDetail> eventNotFound() {
+        ProblemDetail problem = ApiProblems.of(
+                HttpStatus.NOT_FOUND, "EVENT_NOT_FOUND", "Event not found", "The event does not exist.");
         return ResponseEntity.status(problem.getStatus())
                 .contentType(MediaType.APPLICATION_PROBLEM_JSON)
                 .body(problem);

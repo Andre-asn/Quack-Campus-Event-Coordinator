@@ -262,6 +262,7 @@ class MapEventsIT extends PostgresIntegrationTest {
                 longitude,
                 "Library",
                 startsAt,
+                startsAt.plus(2, ChronoUnit.HOURS),
                 Instant.parse("2026-10-21T12:00:00Z")));
     }
 

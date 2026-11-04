@@ -8,6 +8,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -51,6 +52,12 @@ public class EventController {
         return ResponseEntity.ok().eTag(result.etag()).body(result.page());
     }
 
+    // id and token stay strings: a value that is not a UUID names no event, so it is a 404 like any other miss.
+    @GetMapping("/{id}")
+    public EventDetail detail(@PathVariable String id, @RequestParam(required = false) String token) {
+        return events.detail(id, token);
+    }
+
     private static boolean matches(String ifNoneMatch, String etag) {
         if (ifNoneMatch == null || ifNoneMatch.isBlank()) {
             return false;
@@ -83,7 +90,8 @@ public class EventController {
             Double latitude,
             Double longitude,
             String locationLabel,
-            Instant startsAt) {
+            Instant startsAt,
+            Instant endsAt) {
     }
 
     public record EventResponse(
@@ -98,7 +106,8 @@ public class EventController {
             Instant startsAt,
             String visibility,
             String status,
-            Instant createdAt) {
+            Instant createdAt,
+            Instant endsAt) {
 
         static EventResponse from(Event event) {
             return new EventResponse(
@@ -113,7 +122,8 @@ public class EventController {
                     event.getStartsAt(),
                     event.getVisibility(),
                     event.getStatus(),
-                    event.getCreatedAt());
+                    event.getCreatedAt(),
+                    event.getEndsAt());
         }
     }
 }

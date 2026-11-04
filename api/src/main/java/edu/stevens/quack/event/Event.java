@@ -47,6 +47,9 @@ public class Event {
     @Column(name = "starts_at", nullable = false)
     private Instant startsAt;
 
+    @Column(name = "ends_at")
+    private Instant endsAt;
+
     @Column(nullable = false, length = 32)
     private String visibility;
 
@@ -75,6 +78,7 @@ public class Event {
             double longitude,
             String locationLabel,
             Instant startsAt,
+            Instant endsAt,
             Instant when) {
         Event event = new Event();
         event.id = id;
@@ -85,6 +89,7 @@ public class Event {
         event.location = WGS84.createPoint(new Coordinate(longitude, latitude));
         event.locationLabel = locationLabel;
         event.startsAt = startsAt;
+        event.endsAt = endsAt;
         event.visibility = "public";
         event.status = "active";
         event.createdAt = when;
@@ -126,6 +131,10 @@ public class Event {
 
     public Instant getStartsAt() {
         return startsAt;
+    }
+
+    public Instant getEndsAt() {
+        return endsAt;
     }
 
     public String getVisibility() {
