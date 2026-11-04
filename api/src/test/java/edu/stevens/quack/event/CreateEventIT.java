@@ -70,13 +70,15 @@ class CreateEventIT extends PostgresIntegrationTest {
                         "latitude", 40.7440,
                         "longitude", -74.0255,
                         "locationLabel", "Library, 2nd floor",
-                        "startsAt", startsAt.toString()))
+                        "startsAt", startsAt.toString(),
+                        "endsAt", startsAt.plus(2, ChronoUnit.HOURS).toString()))
                 .exchange()
                 .expectStatus().isCreated()
                 .expectBody()
                 .jsonPath("$.hostId").isEqualTo(host.getId().toString())
                 .jsonPath("$.latitude").isEqualTo(40.7440)
                 .jsonPath("$.longitude").isEqualTo(-74.0255)
+                .jsonPath("$.endsAt").isEqualTo(startsAt.plus(2, ChronoUnit.HOURS).toString())
                 .returnResult()
                 .getResponseHeaders()
                 .getFirst(HttpHeaders.LOCATION);
@@ -180,6 +182,16 @@ class CreateEventIT extends PostgresIntegrationTest {
     }
 
     @Test
+    void rejectsAnEndAtOrBeforeTheStart() {
+        User host = signIn();
+        Instant startsAt = Instant.now().plus(2, ChronoUnit.HOURS);
+
+        expectInvalid(post(host, valid(Map.of(
+                "startsAt", startsAt.toString(),
+                "endsAt", startsAt.toString()))), "endsAt", "NOT_AFTER_START");
+    }
+
+    @Test
     void acceptsADescriptionOfExactlyOneHundredFortyCharacters() {
         User host = signIn();
 
@@ -253,9 +265,9 @@ class CreateEventIT extends PostgresIntegrationTest {
                 .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
                 .expectBody()
                 .jsonPath("$.code").isEqualTo("INVALID_EVENT")
-                .jsonPath("$.errors.length()").isEqualTo(7);
+                .jsonPath("$.errors.length()").isEqualTo(8);
         for (String field : List.of(
-                "title", "description", "locationLabel", "category", "startsAt", "latitude", "longitude")) {
+                "title", "description", "locationLabel", "category", "startsAt", "endsAt", "latitude", "longitude")) {
             body.jsonPath("$.errors[?(@.field == '" + field + "' && @.code == 'REQUIRED')]").isNotEmpty();
         }
         assertNoEvents();
@@ -266,6 +278,7 @@ class CreateEventIT extends PostgresIntegrationTest {
     }
 
     private Map<String, Object> valid(Map<String, Object> overrides) {
+        Instant startsAt = Instant.now().plus(2, ChronoUnit.HOURS);
         Map<String, Object> body = new HashMap<>(Map.of(
                 "title", "CS102 study group",
                 "description", "Studying for CS102!",
@@ -273,8 +286,13 @@ class CreateEventIT extends PostgresIntegrationTest {
                 "latitude", 40.7440,
                 "longitude", -74.0255,
                 "locationLabel", "Library, 2nd floor",
-                "startsAt", Instant.now().plus(2, ChronoUnit.HOURS).toString()));
+                "startsAt", startsAt.toString(),
+                "endsAt", startsAt.plus(2, ChronoUnit.HOURS).toString()));
         body.putAll(overrides);
+        if (overrides.containsKey("startsAt") && !overrides.containsKey("endsAt")) {
+            body.put("endsAt", Instant.parse((String) body.get("startsAt"))
+                    .plus(2, ChronoUnit.HOURS).toString());
+        }
         return body;
     }
 
