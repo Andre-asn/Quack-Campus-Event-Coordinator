@@ -23,6 +23,8 @@ export async function createEvent(
   const timer = setTimeout(() => controller.abort(), 15_000);
   try {
     const response = await fetch(`${apiBaseUrl}/api/v1/events`, {
+      // The session goes in our own Cookie header; see the note in auth.ts.
+      credentials: 'omit',
       signal: controller.signal,
       method: 'POST',
       headers: {

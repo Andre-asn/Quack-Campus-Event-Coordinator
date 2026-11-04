@@ -40,6 +40,8 @@ type Props = {
   // Height of the sheet covering the bottom of the map. The map center, and so the pin, sits above it.
   bottomInset?: number;
   onPinMoved?: (place: PinnedPlace) => void;
+  // Tapping a host bubble, or a row in a list, opens that event's detail sheet.
+  onOpenEvent?: (eventId: string) => void;
 };
 
 // Standard keeps its place labels inside an imported style that queries cannot reach, so an
@@ -71,7 +73,7 @@ async function placeAt(map: MapView | null, center: Position): Promise<PinnedPla
   return { latitude, longitude, name };
 }
 
-export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, onPinMoved }: Props) {
+export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, onPinMoved, onOpenEvent }: Props) {
   const insets = useSafeAreaInsets();
   const mapRef = useRef<MapView>(null);
   // Lookups can finish out of order; only the newest may move the pin.
@@ -111,7 +113,7 @@ export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, 
     }
     const controller = new AbortController();
     let cancelled = false;
-    setEvents([]);
+    // Keep the current pins until the new set arrives; clearing first made them flash on every pan.
     setLoadError(false);
     setShowAll(null);
     setViewList(false);
@@ -204,7 +206,11 @@ export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, 
             allowOverlap
             coordinate={[spot.longitude, spot.latitude]}
           >
-            <SpotBubble spot={spot} onShowAll={() => setShowAll(spot)} />
+            <SpotBubble
+              onOpen={onOpenEvent}
+              onShowAll={() => setShowAll(spot)}
+              spot={spot}
+            />
           </MarkerView>
         ))}
       </MapView>
@@ -225,6 +231,10 @@ export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, 
         closeLabel="Close show all"
         events={showAll?.events ?? []}
         onClose={() => setShowAll(null)}
+        onOpen={onOpenEvent && ((id) => {
+          setShowAll(null);
+          onOpenEvent(id);
+        })}
         title="Show all"
         visible={showAll !== null}
       />
@@ -232,6 +242,10 @@ export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, 
         closeLabel="Close events in this view"
         events={events}
         onClose={() => setViewList(false)}
+        onOpen={onOpenEvent && ((id) => {
+          setViewList(false);
+          onOpenEvent(id);
+        })}
         title="Events in this view"
         visible={viewList}
       />
@@ -240,17 +254,27 @@ export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, 
   );
 }
 
-function SpotBubble({ spot, onShowAll }: { spot: Spot; onShowAll: () => void }) {
+function SpotBubble({
+  spot,
+  onOpen,
+  onShowAll,
+}: {
+  spot: Spot;
+  // Absent while pinning a new event; a bubble then opens Show all, as before the detail sheet.
+  onOpen?: (eventId: string) => void;
+  onShowAll: () => void;
+}) {
   const visible = spot.events.slice(0, 3);
   const overflow = spot.events.length > 3;
   return (
     <View style={styles.bubbles}>
       {visible.map((event, index) => (
         <Pressable
-          accessibilityLabel={event.title}
+          accessibilityHint={onOpen ? 'Opens event details' : 'Shows the events here'}
+          accessibilityLabel={`${event.title}, hosted by ${event.host.displayName}`}
           accessibilityRole="button"
           key={event.id}
-          onPress={onShowAll}
+          onPress={onOpen ? () => onOpen(event.id) : onShowAll}
         >
           <Avatar event={event} overlap={index > 0} />
         </Pressable>
@@ -287,12 +311,15 @@ function EventList({
   visible,
   closeLabel,
   onClose,
+  onOpen,
 }: {
   title: string;
   events: MapEvent[];
   visible: boolean;
   closeLabel: string;
   onClose: () => void;
+  // Absent while pinning a new event; rows are then plain text.
+  onOpen?: (eventId: string) => void;
 }) {
   return (
     <Modal animationType="slide" onRequestClose={onClose} transparent visible={visible}>
@@ -303,15 +330,31 @@ function EventList({
             data={events}
             keyExtractor={(event) => event.id}
             ListEmptyComponent={<Text style={styles.rowMeta}>No events in this view</Text>}
-            renderItem={({ item }) => (
-              <View style={styles.row}>
-                <Avatar event={item} />
-                <View style={styles.rowText}>
-                  <Text style={styles.rowTitle}>{item.title}</Text>
-                  <Text style={styles.rowMeta}>{item.host.displayName}</Text>
-                </View>
-              </View>
-            )}
+            renderItem={({ item }) => {
+              const content = (
+                <>
+                  <Avatar event={item} />
+                  <View style={styles.rowText}>
+                    <Text style={styles.rowTitle}>{item.title}</Text>
+                    <Text style={styles.rowMeta}>{item.host.displayName}</Text>
+                  </View>
+                </>
+              );
+              if (!onOpen) {
+                return <View style={styles.row}>{content}</View>;
+              }
+              return (
+                <Pressable
+                  accessibilityHint="Opens event details"
+                  accessibilityLabel={`${item.title}, hosted by ${item.host.displayName}`}
+                  accessibilityRole="button"
+                  onPress={() => onOpen(item.id)}
+                  style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+                >
+                  {content}
+                </Pressable>
+              );
+            }}
           />
           <Pressable accessibilityLabel={closeLabel} accessibilityRole="button" onPress={onClose} style={styles.close}>
             <Text style={styles.closeText}>Close</Text>
@@ -443,6 +486,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     paddingVertical: 8,
+  },
+  rowPressed: {
+    opacity: 0.6,
   },
   rowText: {
     flex: 1,

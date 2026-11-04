@@ -141,13 +141,22 @@ public class EventService {
         }
     }
 
-    /**
-     * Returns event details only when the event is visible to the authenticated caller.
-     *
-     * @param idText event identifier
-     * @param token optional share token for link-only events
-     * @return the event detail payload
-     */
+    private static void text(
+            List<InvalidEventException.InvalidField> errors, String field, String name, String value, int max) {
+        if (value == null || value.isBlank()) {
+            errors.add(invalid(field, "REQUIRED", name + " is required."));
+        } else if (value.codePointCount(0, value.length()) > max) {
+            // Code points, because Postgres varchar limits count characters, not UTF-16 units.
+            errors.add(invalid(field, "TOO_LONG", name + " must be at most " + max + " characters."));
+        }
+    }
+
+    private static InvalidEventException.InvalidField invalid(String field, String code, String detail) {
+        return new InvalidEventException.InvalidField(field, code, detail);
+    }
+
+    // Cancelled events are returned with their status, not hidden. A link-only event needs its share token,
+    // even for the host; anything else, including a tampered or malformed token, is a 404.
     @Transactional(readOnly = true)
     public EventDetail detail(String idText, String token) {
         currentUser.require();
@@ -156,7 +165,7 @@ public class EventService {
             throw new EventNotFoundException();
         }
         Event event = events.findById(id).orElseThrow(EventNotFoundException::new);
-        if ("link_only".equals(event.getVisibility()) && !matchesToken(event.getShareToken(), token)) {
+        if ("link_only".equals(event.getVisibility()) && !opens(event, token)) {
             throw new EventNotFoundException();
         }
         User host = users.findById(event.getHostId()).orElseThrow(EventNotFoundException::new);
@@ -173,35 +182,27 @@ public class EventService {
                 attendance.countByEventId(event.getId()));
     }
 
+    private static boolean opens(Event event, String token) {
+        UUID given = uuidOrNull(token);
+        if (given == null || event.getShareToken() == null) {
+            return false;
+        }
+        return MessageDigest.isEqual(
+                event.getShareToken().toString().getBytes(StandardCharsets.US_ASCII),
+                given.toString().getBytes(StandardCharsets.US_ASCII));
+    }
+
     private static UUID uuidOrNull(String text) {
         if (text == null || text.isBlank()) {
             return null;
         }
         try {
             UUID parsed = UUID.fromString(text.trim());
+            // UUID.fromString accepts short groups like "1-1-1-1-1"; only the canonical form names an event.
             return parsed.toString().equalsIgnoreCase(text.trim()) ? parsed : null;
         } catch (IllegalArgumentException ex) {
             return null;
         }
-    }
-
-    private static boolean matchesToken(UUID expected, String supplied) {
-        UUID parsed = uuidOrNull(supplied);
-        return expected != null && parsed != null && expected.equals(parsed);
-    }
-
-    private static void text(
-            List<InvalidEventException.InvalidField> errors, String field, String name, String value, int max) {
-        if (value == null || value.isBlank()) {
-            errors.add(invalid(field, "REQUIRED", name + " is required."));
-        } else if (value.codePointCount(0, value.length()) > max) {
-            // Code points, because Postgres varchar limits count characters, not UTF-16 units.
-            errors.add(invalid(field, "TOO_LONG", name + " must be at most " + max + " characters."));
-        }
-    }
-
-    private static InvalidEventException.InvalidField invalid(String field, String code, String detail) {
-        return new InvalidEventException.InvalidField(field, code, detail);
     }
 
     @Transactional(readOnly = true)
