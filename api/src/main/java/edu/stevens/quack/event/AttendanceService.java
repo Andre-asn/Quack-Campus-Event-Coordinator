@@ -65,6 +65,34 @@ public class AttendanceService {
         attendance.join(eventId, user.getId());
     }
 
+    /**
+     * Removes the signed-in user's attendance. Leaving is allowed after cancellation or event end.
+     *
+     * @param eventId event to leave
+     * @param token optional share token for link-only events
+     */
+    @Transactional
+    public void leave(UUID eventId, String token) {
+        User user = currentUser.require();
+
+        Event event = events.findById(eventId)
+                .orElseThrow(AttendanceService::notFound);
+
+        if ("link_only".equals(event.getVisibility())
+                && !matchesToken(event.getShareToken(), token)) {
+            throw notFound();
+        }
+
+        if (event.getHostId().equals(user.getId())) {
+            throw new AttendanceException(
+                    HttpStatus.CONFLICT,
+                    "HOST_CANNOT_LEAVE",
+                    "The event host cannot leave their own event.");
+        }
+
+        attendance.leave(eventId, user.getId());
+    }
+
     private static boolean matchesToken(UUID expected, String supplied) {
         if (expected == null || supplied == null) {
             return false;

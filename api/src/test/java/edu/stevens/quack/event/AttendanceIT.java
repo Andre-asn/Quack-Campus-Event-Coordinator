@@ -18,6 +18,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.client.RestTestClient;
@@ -115,6 +116,126 @@ class AttendanceIT extends PostgresIntegrationTest {
                 .expectStatus().isOk();
 
         assertThat(attendance.countByEventId(eventId)).isEqualTo(2L);
+    }
+
+    @Test
+    void joinsThenLeavesWithAnEmpty204Response() {
+        UUID eventId = createEvent(user("host"));
+        String session = sessionFor(user("student"));
+        join(eventId, session).expectStatus().isOk();
+
+        leave(eventId, session)
+                .expectStatus().isNoContent()
+                .expectBody().isEmpty();
+
+        assertThat(attendance.countByEventId(eventId)).isZero();
+    }
+
+    @Test
+    void repeatedAndNeverJoinedLeavesAreIdempotent() {
+        UUID eventId = createEvent(user("host"));
+        String session = sessionFor(user("student"));
+
+        leave(eventId, session).expectStatus().isNoContent().expectBody().isEmpty();
+        join(eventId, session).expectStatus().isOk();
+        leave(eventId, session).expectStatus().isNoContent().expectBody().isEmpty();
+        leave(eventId, session).expectStatus().isNoContent().expectBody().isEmpty();
+
+        assertThat(attendance.countByEventId(eventId)).isZero();
+    }
+
+    @Test
+    void hostCannotLeaveAndTheirAttendanceIsPreserved() {
+        User host = user("host");
+        UUID eventId = createEvent(host);
+        String session = sessionFor(host);
+        join(eventId, session).expectStatus().isOk();
+
+        leave(eventId, session)
+                .expectStatus().isEqualTo(409)
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                .expectBody()
+                .jsonPath("$.code").isEqualTo("HOST_CANNOT_LEAVE");
+
+        assertThat(attendance.countByEventId(eventId)).isEqualTo(1L);
+    }
+
+    @Test
+    void oneStudentCanLeaveWithoutRemovingAnother() {
+        UUID eventId = createEvent(user("host"));
+        User first = user("student-one");
+        User second = user("student-two");
+        String firstSession = sessionFor(first);
+        join(eventId, firstSession).expectStatus().isOk();
+        join(eventId, sessionFor(second)).expectStatus().isOk();
+
+        leave(eventId, firstSession).expectStatus().isNoContent();
+
+        assertThat(attendance.countByEventId(eventId)).isEqualTo(1L);
+        assertThat(jdbc.queryForObject(
+                "select count(*) from event_attendance where event_id = ? and user_id = ?",
+                Long.class, eventId, second.getId())).isEqualTo(1L);
+    }
+
+    @Test
+    void detailCountDecreasesOnceAfterLeaving() {
+        UUID eventId = createEvent(user("host"));
+        String firstSession = sessionFor(user("student-one"));
+        String secondSession = sessionFor(user("student-two"));
+        join(eventId, firstSession).expectStatus().isOk();
+        join(eventId, secondSession).expectStatus().isOk();
+
+        detail(eventId, secondSession).expectStatus().isOk().expectBody()
+                .jsonPath("$.attendeeCount").isEqualTo(2);
+        leave(eventId, firstSession).expectStatus().isNoContent();
+        detail(eventId, secondSession).expectStatus().isOk().expectBody()
+                .jsonPath("$.attendeeCount").isEqualTo(1);
+        leave(eventId, firstSession).expectStatus().isNoContent();
+        detail(eventId, secondSession).expectStatus().isOk().expectBody()
+                .jsonPath("$.attendeeCount").isEqualTo(1);
+    }
+
+    @Test
+    void anonymousLeaveIsUnauthorizedAndDoesNotDelete() {
+        UUID eventId = createEvent(user("host"));
+        String session = sessionFor(user("student"));
+        join(eventId, session).expectStatus().isOk();
+
+        client.delete().uri("/api/v1/events/" + eventId + "/attendance")
+                .exchange().expectStatus().isUnauthorized();
+
+        assertThat(attendance.countByEventId(eventId)).isEqualTo(1L);
+    }
+
+    @Test
+    void missingAndHiddenEventsDoNotRevealInformationWhenLeaving() {
+        String session = sessionFor(user("student"));
+        leave(UUID.randomUUID(), session).expectStatus().isNotFound()
+                .expectBody().jsonPath("$.code").isEqualTo("EVENT_NOT_FOUND");
+
+        UUID eventId = createEvent(user("host"));
+        UUID token = UUID.randomUUID();
+        jdbc.update("update events set visibility = 'link_only', share_token = ? where id = ?", token, eventId);
+        leave(eventId, session).expectStatus().isNotFound()
+                .expectBody().jsonPath("$.code").isEqualTo("EVENT_NOT_FOUND");
+        leaveWithToken(eventId, session, token.toString()).expectStatus().isNoContent();
+    }
+
+    @Test
+    void canLeaveCancelledAndEndedEvents() {
+        UUID cancelled = createEvent(user("host-cancelled"));
+        String cancelledSession = sessionFor(user("student-cancelled"));
+        join(cancelled, cancelledSession).expectStatus().isOk();
+        jdbc.update("update events set status = 'cancelled' where id = ?", cancelled);
+        leave(cancelled, cancelledSession).expectStatus().isNoContent();
+
+        UUID ended = createEvent(user("host-ended"));
+        String endedSession = sessionFor(user("student-ended"));
+        join(ended, endedSession).expectStatus().isOk();
+        jdbc.update("update events set starts_at = ?, ends_at = ? where id = ?",
+                java.sql.Timestamp.from(TEST_NOW.minusNanos(1_000_000)),
+                java.sql.Timestamp.from(TEST_NOW), ended);
+        leave(ended, endedSession).expectStatus().isNoContent();
     }
 
     @Test
@@ -324,6 +445,29 @@ class AttendanceIT extends PostgresIntegrationTest {
                 .header(HttpHeaders.COOKIE, "JSESSIONID=" + session)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(Map.of("token", token))
+                .exchange();
+    }
+
+    private RestTestClient.ResponseSpec leave(UUID eventId, String session) {
+        return client.delete()
+                .uri("/api/v1/events/" + eventId + "/attendance")
+                .header(HttpHeaders.COOKIE, "JSESSIONID=" + session)
+                .exchange();
+    }
+
+    private RestTestClient.ResponseSpec leaveWithToken(UUID eventId, String session, String token) {
+        return client.method(HttpMethod.DELETE)
+                .uri("/api/v1/events/" + eventId + "/attendance")
+                .header(HttpHeaders.COOKIE, "JSESSIONID=" + session)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("token", token))
+                .exchange();
+    }
+
+    private RestTestClient.ResponseSpec detail(UUID eventId, String session) {
+        return client.get()
+                .uri("/api/v1/events/" + eventId)
+                .header(HttpHeaders.COOKIE, "JSESSIONID=" + session)
                 .exchange();
     }
 

@@ -22,6 +22,13 @@ public class AttendanceRepository {
                 """, eventId, userId);
     }
 
+    public void leave(UUID eventId, UUID userId) {
+        jdbc.update("""
+                delete from event_attendance
+                where event_id = ? and user_id = ?
+                """, eventId, userId);
+    }
+
     public long countByEventId(UUID eventId) {
         Long count = jdbc.queryForObject("""
                 select count(*)

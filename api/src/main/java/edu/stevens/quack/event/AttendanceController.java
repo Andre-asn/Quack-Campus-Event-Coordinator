@@ -5,6 +5,7 @@ import java.util.UUID;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -25,6 +26,14 @@ public class AttendanceController {
             @RequestBody(required = false) JoinRequest request) {
         attendance.join(eventId, request == null ? null : request.token());
         return ResponseEntity.ok().build();
+    }
+
+    @DeleteMapping("/{id}/attendance")
+    public ResponseEntity<Void> leave(
+            @PathVariable("id") UUID eventId,
+            @RequestBody(required = false) JoinRequest request) {
+        attendance.leave(eventId, request == null ? null : request.token());
+        return ResponseEntity.noContent().build();
     }
 
     public record JoinRequest(String token) {
