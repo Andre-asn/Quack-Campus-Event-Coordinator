@@ -16,7 +16,9 @@ public record MapEventPage(List<MapPin> events, String nextCursor) {
             double latitude,
             double longitude,
             Instant startsAt,
-            MapHost host) {
+            MapHost host,
+            String visibility,
+            @JsonInclude(JsonInclude.Include.NON_NULL) UUID shareToken) {
     }
 
     public record MapHost(String displayName, String avatarUrl) {

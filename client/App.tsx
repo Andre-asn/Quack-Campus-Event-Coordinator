@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import * as Linking from 'expo-linking';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -16,6 +17,7 @@ import EventDetailSheet from './src/EventDetailSheet';
 import LoadingScreen from './src/LoadingScreen';
 import SignInScreen, { type SignInError } from './src/SignInScreen';
 import { restoreSession, signInWithGoogle, signOut } from './src/auth';
+import { eventFromLink } from './src/events';
 import type { StoredSession } from './src/sessionStore';
 import { colors } from './src/theme';
 
@@ -42,6 +44,8 @@ function QuackApp() {
   const [pinned, setPinned] = useState<PinnedPlace | null>(null);
   const [mapRefresh, setMapRefresh] = useState(0);
   const [openEventId, setOpenEventId] = useState<string | null>(null);
+  const [openToken, setOpenToken] = useState<string | null>(null);
+  const [pendingLink, setPendingLink] = useState<{ id: string; token: string } | null>(null);
   const [fontsLoaded, fontError] = useFonts({
     BricolageGrotesque_600SemiBold,
     BricolageGrotesque_700Bold,
@@ -102,6 +106,30 @@ function QuackApp() {
     setScreen({ ...screen, busy: false, message: 'Could not sign out. Try again.' });
   }
 
+  useEffect(() => {
+    function take(url: string | null) {
+      const event = url ? eventFromLink(url) : null;
+      if (!event) {
+        return;
+      }
+      setPendingLink(event);
+      setOpenEventId(event.id);
+      setOpenToken(event.token);
+      setCreating(false);
+    }
+    Linking.getInitialURL().then(take).catch(() => undefined);
+    const subscription = Linking.addEventListener('url', ({ url }) => take(url));
+    return () => subscription.remove();
+  }, []);
+
+  useEffect(() => {
+    if (screen.status === 'signed-in' && pendingLink) {
+      setOpenEventId(pendingLink.id);
+      setOpenToken(pendingLink.token);
+      setCreating(false);
+    }
+  }, [screen.status, pendingLink]);
+
   function closeCreate() {
     setCreating(false);
     setSheetInset(0);
@@ -127,7 +155,10 @@ function QuackApp() {
         <CampusMap
           bottomInset={sheetInset}
           // While pinning a new event, taps on other events stay on the create sheet.
-          onOpenEvent={creating ? undefined : setOpenEventId}
+          onOpenEvent={creating ? undefined : (id, token) => {
+            setOpenEventId(id);
+            setOpenToken(token ?? null);
+          }}
           onPinMoved={creating ? setPinned : undefined}
           refreshKey={mapRefresh}
           sessionId={screen.session.sessionId}
@@ -138,7 +169,11 @@ function QuackApp() {
         <EventDetailSheet
           eventId={openEventId}
           key={openEventId}
-          onClose={() => setOpenEventId(null)}
+          onClose={() => {
+            setOpenEventId(null);
+            setOpenToken(null);
+          }}
+          token={openToken}
           sessionId={screen.session.sessionId}
         />
       ) : creating ? (

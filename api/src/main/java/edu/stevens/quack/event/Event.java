@@ -79,6 +79,8 @@ public class Event {
             String locationLabel,
             Instant startsAt,
             Instant endsAt,
+            String visibility,
+            UUID shareToken,
             Instant when) {
         Event event = new Event();
         event.id = id;
@@ -86,15 +88,39 @@ public class Event {
         event.title = title;
         event.description = description;
         event.category = category;
-        event.location = WGS84.createPoint(new Coordinate(longitude, latitude));
+        event.location = point(latitude, longitude);
         event.locationLabel = locationLabel;
         event.startsAt = startsAt;
         event.endsAt = endsAt;
-        event.visibility = "public";
+        event.visibility = visibility;
+        event.shareToken = shareToken;
         event.status = "active";
         event.createdAt = when;
         event.updatedAt = when;
         return event;
+    }
+
+    // Started events stay editable. Visibility, the share token, and who hosts it do not change here.
+    public void change(
+            String title,
+            String description,
+            String category,
+            double latitude,
+            double longitude,
+            String locationLabel,
+            Instant startsAt,
+            Instant when) {
+        this.title = title;
+        this.description = description;
+        this.category = category;
+        this.location = point(latitude, longitude);
+        this.locationLabel = locationLabel;
+        this.startsAt = startsAt;
+        this.updatedAt = when;
+    }
+
+    private static Point point(double latitude, double longitude) {
+        return WGS84.createPoint(new Coordinate(longitude, latitude));
     }
 
     public UUID getId() {

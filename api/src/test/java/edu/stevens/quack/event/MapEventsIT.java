@@ -55,6 +55,7 @@ class MapEventsIT extends PostgresIntegrationTest {
     @BeforeEach
     @AfterEach
     void clean() {
+        jdbc.update("delete from event_attendance");
         jdbc.update("delete from events");
         users.deleteAll();
     }
@@ -103,20 +104,33 @@ class MapEventsIT extends PostgresIntegrationTest {
     }
 
     @Test
-    void excludesLinkOnlyEventsEvenForTheHost() {
-        User host = host("ada");
+    void showsLinkOnlyEventsOnlyOnTheirHostsMap() {
+        User ada = host("ada");
+        User bea = host("bea");
         Instant today = noonToday();
-        Event hidden = save(host, "Private table", 40.745, -74.025, today);
-        jdbc.update("update events set visibility = 'link_only' where id = ?", hidden.getId());
-        save(host, "Public table", 40.746, -74.025, today);
+        save(ada, "Public table", 40.745, -74.026, today);
+        Event adaPrivate = save(ada, "Ada private", 40.745, -74.025, today);
+        Event beaPrivate = save(bea, "Bea private", 40.746, -74.025, today);
+        jdbc.update("update events set visibility = 'link_only' where id in (?, ?)", adaPrivate.getId(), beaPrivate.getId());
 
         client.get().uri(mapUri(BBOX, startOfToday(), startOfTomorrow(), 50, null))
-                .header(HttpHeaders.COOKIE, "JSESSIONID=" + sessionFor(host))
+                .header(HttpHeaders.COOKIE, "JSESSIONID=" + sessionFor(ada))
                 .exchange()
                 .expectStatus().isOk()
                 .expectBody()
-                .jsonPath("$.events.length()").isEqualTo(1)
-                .jsonPath("$.events[0].title").isEqualTo("Public table");
+                .jsonPath("$.events.length()").isEqualTo(2)
+                .jsonPath("$.events[?(@.title == 'Public table' && @.visibility == 'public')]").isNotEmpty()
+                .jsonPath("$.events[?(@.title == 'Ada private' && @.visibility == 'link_only')]").isNotEmpty()
+                .jsonPath("$.events[?(@.title == 'Bea private')]").isEmpty();
+
+        client.get().uri(mapUri(BBOX, startOfToday(), startOfTomorrow(), 50, null))
+                .header(HttpHeaders.COOKIE, "JSESSIONID=" + sessionFor(bea))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.events[?(@.title == 'Public table')]").isNotEmpty()
+                .jsonPath("$.events[?(@.title == 'Bea private' && @.visibility == 'link_only')]").isNotEmpty()
+                .jsonPath("$.events[?(@.title == 'Ada private')]").isEmpty();
     }
 
     @Test
@@ -263,6 +277,8 @@ class MapEventsIT extends PostgresIntegrationTest {
                 "Library",
                 startsAt,
                 startsAt.plus(2, ChronoUnit.HOURS),
+                "public",
+                null,
                 Instant.parse("2026-10-21T12:00:00Z")));
     }
 
