@@ -26,7 +26,9 @@ import PeopleIcon from '../assets/detail/people.svg';
 import PlaceIcon from '../assets/detail/place.svg';
 import CloseIcon from '../assets/create/close.svg';
 import { loadEventDetail, type EventDetail } from './eventDetail';
-import { colors, easeOut, fonts } from './theme';
+import { categoryLabel } from './categories';
+// Reanimated's withTiming needs the worklet easing, not core Animated's easeOut.
+import { colors, fonts, sheetEaseOut as easeOut } from './theme';
 import { formatWhen, relativeStart } from './when';
 
 type Props = {
@@ -209,7 +211,7 @@ function Details({ event, now }: { event: EventDetail; now: Date }) {
     : relative.startsWith('in ')
       ? `Starts ${relative}`
       : `Started ${relative}`;
-  const category = event.category[0].toUpperCase() + event.category.slice(1);
+  const category = categoryLabel(event.category);
 
   return (
     <ScrollView bounces={false} contentContainerStyle={styles.content}>

@@ -1,4 +1,5 @@
 import { Easing } from 'react-native';
+import { Easing as ReanimatedEasing, cubicBezier } from 'react-native-reanimated';
 
 // Tokens from the Quack! Figma redesign.
 export const colors = {
@@ -27,4 +28,11 @@ export const fonts = {
   displaySemiBold: 'BricolageGrotesque_600SemiBold',
 };
 
+// For core Animated (sign-in, loading). Reanimated runs on the UI thread and can't call this one.
 export const easeOut = Easing.bezier(0.23, 1, 0.32, 1);
+
+// The same curves for Reanimated: worklet easing for withTiming and layout animations,
+// and CSS easing for Reanimated CSS transitions.
+export const sheetEaseOut = ReanimatedEasing.bezier(0.23, 1, 0.32, 1);
+export const cssEaseOut = cubicBezier(0.23, 1, 0.32, 1);
+export const cssEaseInOut = cubicBezier(0.77, 0, 0.175, 1);

@@ -1,8 +1,5 @@
+import type { Category } from './categories';
 import type { MapEvent } from './mapEvents';
-
-// Matches the server's category list (EventService.CATEGORIES).
-export const categories = ['study', 'food', 'sports', 'games', 'movie', 'music', 'other'] as const;
-export type Category = (typeof categories)[number];
 
 // The map query only loads today, so every window is within today. Other days are the date stepper (F8).
 export const timeWindows = ['all', 'started', 'soon', 'later'] as const;
@@ -36,10 +33,6 @@ const HOUR_MS = 60 * 60 * 1000;
 
 export function isFiltering(filter: EventFilter): boolean {
   return filter.categories.length > 0 || filter.time !== 'all';
-}
-
-export function categoryLabel(category: string): string {
-  return category[0].toUpperCase() + category.slice(1);
 }
 
 function inWindow(startsAt: number, window: TimeWindow, now: number): boolean {
