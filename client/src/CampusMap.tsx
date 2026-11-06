@@ -18,6 +18,7 @@ import EventFilters from './EventFilters';
 import { applyFilter, isFiltering, noFilter, type EventFilter } from './listFilters';
 import { groupBySpot, loadMapEvents, type MapEvent, type Spot } from './mapEvents';
 import { sheetEaseOut } from './theme';
+import TopBar, { TOP_BAR_GAP, TOP_BAR_HEIGHT, type Account } from './TopBar';
 
 if (mapboxAccessToken) {
   void Mapbox.setAccessToken(mapboxAccessToken);
@@ -52,6 +53,8 @@ type Props = {
   onPinMoved?: (place: PinnedPlace) => void;
   // Tapping a host bubble, or a row in a list, opens that event's detail sheet.
   onOpenEvent?: (eventId: string) => void;
+  // The signed-in user, for the top bar. Absent hides the bar (while a sheet covers the map).
+  account?: Account;
 };
 
 // Standard keeps its place labels inside an imported style that queries cannot reach, so an
@@ -83,7 +86,14 @@ async function placeAt(map: MapView | null, center: Position): Promise<PinnedPla
   return { latitude, longitude, name };
 }
 
-export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, onPinMoved, onOpenEvent }: Props) {
+export default function CampusMap({
+  sessionId,
+  refreshKey = 0,
+  bottomInset = 0,
+  onPinMoved,
+  onOpenEvent,
+  account,
+}: Props) {
   const insets = useSafeAreaInsets();
   const mapRef = useRef<MapView>(null);
   // Lookups can finish out of order; only the newest may move the pin.
@@ -93,6 +103,8 @@ export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, 
   const [day, setDay] = useState(() => campusDayKey(new Date()));
   const [bbox, setBbox] = useState<string | null>(null);
   const [events, setEvents] = useState<MapEvent[]>([]);
+  // False until the first query answers, so the top bar doesn't claim "0 events today" while loading.
+  const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [showAll, setShowAll] = useState<Spot | null>(null);
   const [viewList, setViewList] = useState(false);
@@ -135,6 +147,7 @@ export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, 
           return;
         }
         setEvents(result.events);
+        setLoaded(true);
         setLoadError(false);
       })
       .catch((error: unknown) => {
@@ -227,18 +240,17 @@ export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, 
         ))}
       </MapView>
       {loadError ? (
-        <View pointerEvents="none" style={styles.empty}>
+        // Sits just under the top bar.
+        <View
+          pointerEvents="none"
+          style={[styles.empty, { top: insets.top + TOP_BAR_GAP + TOP_BAR_HEIGHT + 12 }]}
+        >
           <Text style={styles.errorText}>Couldn't load events. Pan the map to try again.</Text>
         </View>
       ) : null}
-      <Pressable
-        accessibilityLabel="Events in this view"
-        accessibilityRole="button"
-        onPress={() => setViewList(true)}
-        style={[styles.listButton, { bottom: Math.max(insets.bottom, bottomInset) + 16 }]}
-      >
-        <Text style={styles.listButtonText}>Events in this view</Text>
-      </Pressable>
+      {account ? (
+        <TopBar account={account} count={loaded ? events.length : null} onOpenList={() => setViewList(true)} />
+      ) : null}
       <EventList
         closeLabel="Close show all"
         events={showAll?.events ?? []}
@@ -543,28 +555,14 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginTop: -6,
   },
-  listButton: {
-    backgroundColor: '#fff',
-    borderRadius: 999,
-    elevation: 3,
-    justifyContent: 'center',
-    left: 16,
-    minHeight: 44,
-    paddingHorizontal: 16,
-    position: 'absolute',
-  },
-  listButtonText: {
-    color: '#111',
-    fontWeight: '600',
-  },
   empty: {
     alignSelf: 'center',
     backgroundColor: '#fff',
     borderRadius: 999,
     elevation: 2,
-    marginTop: 72,
     paddingHorizontal: 14,
     paddingVertical: 8,
+    position: 'absolute',
   },
   errorText: {
     color: '#8a1f1f',
