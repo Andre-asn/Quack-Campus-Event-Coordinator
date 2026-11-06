@@ -34,6 +34,7 @@ class MapEventQuery {
                        ST_X(e.location::geometry) as longitude,
                        u.display_name, u.avatar_url,
                        -- Counted per row through the (event_id, user_id) primary key; no counter column.
+                       -- Same definition as AttendanceRepository.countByEventId (the detail sheet); change both together.
                        (select count(*) from event_attendance a where a.event_id = e.id) as attendee_count
                 from events e
                 join users u on u.id = e.host_id

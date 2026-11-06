@@ -9,9 +9,16 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -322,16 +329,125 @@ class MapEventsIT extends PostgresIntegrationTest {
         assertThat(after).isNotNull().isNotEqualTo(before);
     }
 
+    @Test
+    void changesTheEtagWhenSomeoneLeaves() {
+        User host = host("ada");
+        Event event = joinable(save(host, "Inside", 40.745, -74.025, noonToday()));
+        String guest = sessionFor(host("grace"));
+        var uri = mapUri(BBOX, startOfToday(), startOfTomorrow(), 50, null);
+        join(event, guest);
+        String before = etag(uri, guest);
+
+        client.delete().uri("/api/v1/events/{id}/attendance", event.getId())
+                .header(HttpHeaders.COOKIE, "JSESSIONID=" + guest)
+                .exchange()
+                .expectStatus().is2xxSuccessful();
+
+        assertThat(etag(uri, guest)).isNotNull().isNotEqualTo(before);
+    }
+
+    @Test
+    void changesTheEtagWhenTheLocationLabelChanges() {
+        User host = host("ada");
+        Event event = save(host, "Inside", 40.745, -74.025, noonToday());
+        String session = sessionFor(host);
+        var uri = mapUri(BBOX, startOfToday(), startOfTomorrow(), 50, null);
+        String before = etag(uri, session);
+
+        jdbc.update("update events set location_label = 'Library, 3rd floor' where id = ?", event.getId());
+
+        client.get().uri(uri)
+                .header(HttpHeaders.COOKIE, "JSESSIONID=" + session)
+                .header(HttpHeaders.IF_NONE_MATCH, before)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.events[0].locationLabel").isEqualTo("Library, 3rd floor");
+        assertThat(etag(uri, session)).isNotEqualTo(before);
+    }
+
+    @Test
+    void countsEachAttendeeOnceIncludingARepeatedJoin() {
+        User host = host("ada");
+        Event event = joinable(save(host, "Inside", 40.745, -74.025, noonToday()));
+        String grace = sessionFor(host("grace"));
+        String alan = sessionFor(host("alan"));
+        join(event, grace);
+        join(event, grace);
+        join(event, alan);
+
+        client.get().uri(mapUri(BBOX, startOfToday(), startOfTomorrow(), 50, null))
+                .header(HttpHeaders.COOKIE, "JSESSIONID=" + grace)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.events[0].attendeeCount").isEqualTo(2);
+    }
+
+    // CLAUDE.md edge case: simultaneous joins.
+    @Test
+    void countsSimultaneousJoins() throws Exception {
+        User host = host("ada");
+        Event event = joinable(save(host, "Inside", 40.745, -74.025, noonToday()));
+        List<String> sessions = new ArrayList<>();
+        for (int i = 0; i < 8; i++) {
+            sessions.add(sessionFor(host("guest" + i)));
+        }
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(sessions.size());
+        try {
+            List<Future<?>> joins = new ArrayList<>();
+            for (String session : sessions) {
+                joins.add(pool.submit(() -> {
+                    start.await();
+                    join(event, session);
+                    return null;
+                }));
+            }
+            start.countDown();
+            for (Future<?> join : joins) {
+                join.get(30, TimeUnit.SECONDS);
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+
+        client.get().uri(mapUri(BBOX, startOfToday(), startOfTomorrow(), 50, null))
+                .header(HttpHeaders.COOKIE, "JSESSIONID=" + sessions.get(0))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.events[0].attendeeCount").isEqualTo(8);
+    }
+
+    private void join(Event event, String session) {
+        client.put().uri("/api/v1/events/{id}/attendance", event.getId())
+                .header(HttpHeaders.COOKIE, "JSESSIONID=" + session)
+                .exchange()
+                .expectStatus().is2xxSuccessful();
+    }
+
+    private String etag(java.util.function.Function<UriBuilder, URI> uri, String session) {
+        return client.get().uri(uri)
+                .header(HttpHeaders.COOKIE, "JSESSIONID=" + session)
+                .exchange()
+                .expectStatus().isOk()
+                .returnResult(Void.class)
+                .getResponseHeaders()
+                .getFirst(HttpHeaders.ETAG);
+    }
+
     // CLAUDE.md: map queries return in under 500 ms at p95 with 2,000 seeded events.
     @Test
     void answersWithinTheLatencyTargetWithTwoThousandSeededEventsAndAttendees() throws Exception {
         jdbc.execute(Files.readString(Path.of("scripts/seed-events.sql")));
-        // Five attendees on every event, so the count subquery has rows to count.
+        // Five attendees on every event, never its own host (the API never auto-joins a host).
         jdbc.update("""
                 insert into event_attendance (event_id, user_id)
                 select e.id, u.id
                 from events e
-                cross join lateral (select id from users where is_seed order by id limit 5) u
+                cross join lateral (
+                    select id from users where is_seed and id <> e.host_id order by id limit 5) u
                 on conflict do nothing
                 """);
         String session = sessionFor(host("ada"));
