@@ -410,22 +410,15 @@ function EventList({
         </Animated.View>
         <Animated.View style={[styles.sheet, sheetStyle]}>
           <Text style={styles.sheetTitle}>{title}</Text>
-          {filter && onFilterChange ? <EventFilters filter={filter} onChange={onFilterChange} /> : null}
+          {filter && onFilterChange ? (
+            <EventFilters filter={filter} matching={shown.length} onChange={onFilterChange} total={events.length} />
+          ) : null}
           <FlatList
             data={shown}
             keyExtractor={(event) => event.id}
-            ListEmptyComponent={filtered && onFilterChange ? (
-              <View style={styles.noMatch}>
-                <Text accessibilityLiveRegion="polite" style={styles.rowMeta}>No events match these filters.</Text>
-                <Pressable
-                  accessibilityLabel="Clear filters"
-                  accessibilityRole="button"
-                  onPress={() => onFilterChange(noFilter)}
-                  style={styles.clear}
-                >
-                  <Text style={styles.closeText}>Clear filters</Text>
-                </Pressable>
-              </View>
+            // The count line above already has the one Clear control.
+            ListEmptyComponent={filtered ? (
+              <Text accessibilityLiveRegion="polite" style={styles.rowMeta}>No events match these filters.</Text>
             ) : (
               <Text style={styles.rowMeta}>No events in this view</Text>
             )}
@@ -588,14 +581,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     paddingVertical: 8,
-  },
-  noMatch: {
-    alignItems: 'flex-start',
-    gap: 4,
-  },
-  clear: {
-    justifyContent: 'center',
-    minHeight: 44,
   },
   rowPressed: {
     opacity: 0.6,

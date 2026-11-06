@@ -8,8 +8,17 @@ export type Category = (typeof categories)[number];
 export const timeWindows = ['all', 'started', 'soon', 'later'] as const;
 export type TimeWindow = (typeof timeWindows)[number];
 
+// Short enough that all four fit in one segmented control on a 360pt phone.
 export const timeWindowLabels: Record<TimeWindow, string> = {
-  all: 'All',
+  all: 'Any time',
+  started: 'Started',
+  soon: 'Next hour',
+  later: 'Later',
+};
+
+// What screen readers say: the full wording from #77.
+export const timeWindowAccessibilityLabels: Record<TimeWindow, string> = {
+  all: 'Any time today',
   started: 'Already started',
   soon: 'Starting within an hour',
   later: 'Later today',
