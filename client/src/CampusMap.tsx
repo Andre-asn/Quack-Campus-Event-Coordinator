@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { FlatList, Image, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { FlatList, Image, Modal, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Mapbox, { Camera, CircleLayer, MapView, MarkerView, StyleImport, VectorSource } from '@rnmapbox/maps';
 import type { Position } from 'geojson';
@@ -16,6 +24,9 @@ if (mapboxAccessToken) {
   // CLAUDE.md: no analytics or third-party tracking.
   Mapbox.setTelemetryEnabled(false);
 }
+
+// Same curve as the create and detail sheets.
+const SHEET_EASE = Easing.bezier(0.23, 1, 0.32, 1);
 
 // Mapbox Standard draws 3D buildings and supports dawn/day/dusk/night lighting.
 const standardStyle = 'mapbox://styles/mapbox/standard';
@@ -347,10 +358,57 @@ function EventList({
   const shown = filter ? applyFilter(events, filter, now) : events;
   const filtered = Boolean(filter && isFiltering(filter) && events.length > 0);
 
+  // The dim fades in place while the sheet slides up, as in Figma 04/05. With Reduce Motion, both only fade.
+  const { height } = useWindowDimensions();
+  const reduced = useReducedMotion();
+  const dim = useSharedValue(0);
+  const offset = useSharedValue(height);
+
+  useEffect(() => {
+    if (!visible) {
+      dim.set(0);
+      offset.set(height);
+      return;
+    }
+    dim.set(withTiming(1, { duration: 200 }));
+    offset.set(reduced ? 0 : withTiming(0, { duration: 300, easing: SHEET_EASE }));
+  }, [visible, reduced, height, dim, offset]);
+
+  // Exit is quicker than entry, and the list only unmounts once the sheet is gone.
+  function close() {
+    const done = (finished?: boolean) => {
+      'worklet';
+      if (finished) {
+        scheduleOnRN(onClose);
+      }
+    };
+    if (reduced) {
+      dim.set(withTiming(0, { duration: 150 }, done));
+      return;
+    }
+    dim.set(withTiming(0, { duration: 200 }));
+    offset.set(withTiming(height, { duration: 200, easing: SHEET_EASE }, done));
+  }
+
+  const dimStyle = useAnimatedStyle(() => ({ opacity: dim.get() }));
+  const sheetStyle = useAnimatedStyle(() => ({
+    opacity: reduced ? dim.get() : 1,
+    transform: [{ translateY: offset.get() }],
+  }));
+
   return (
-    <Modal animationType="slide" onRequestClose={onClose} transparent visible={visible}>
-      <View style={styles.sheetBackdrop}>
-        <View style={styles.sheet}>
+    <Modal animationType="none" onRequestClose={close} transparent visible={visible}>
+      <View style={styles.sheetHost}>
+        {/* Tapping the dimmed map closes the list; screen readers use the Close button instead. */}
+        <Animated.View style={[StyleSheet.absoluteFill, styles.scrim, dimStyle]}>
+          <Pressable
+            accessible={false}
+            importantForAccessibility="no"
+            onPress={close}
+            style={StyleSheet.absoluteFill}
+          />
+        </Animated.View>
+        <Animated.View style={[styles.sheet, sheetStyle]}>
           <Text style={styles.sheetTitle}>{title}</Text>
           {filter && onFilterChange ? <EventFilters filter={filter} onChange={onFilterChange} /> : null}
           <FlatList
@@ -397,10 +455,10 @@ function EventList({
               );
             }}
           />
-          <Pressable accessibilityLabel={closeLabel} accessibilityRole="button" onPress={onClose} style={styles.close}>
+          <Pressable accessibilityLabel={closeLabel} accessibilityRole="button" onPress={close} style={styles.close}>
             <Text style={styles.closeText}>Close</Text>
           </Pressable>
-        </View>
+        </Animated.View>
       </View>
     </Modal>
   );
@@ -505,10 +563,13 @@ const styles = StyleSheet.create({
   errorText: {
     color: '#8a1f1f',
   },
-  sheetBackdrop: {
-    backgroundColor: 'rgba(0,0,0,0.35)',
+  sheetHost: {
     flex: 1,
     justifyContent: 'flex-end',
+  },
+  // Figma 04/05: ink at 36%.
+  scrim: {
+    backgroundColor: 'rgba(30,26,29,0.36)',
   },
   sheet: {
     backgroundColor: '#fff',
