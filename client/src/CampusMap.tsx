@@ -7,6 +7,8 @@ import { StatusBar } from 'expo-status-bar';
 
 import { mapboxAccessToken, stevensCenter } from './config';
 import { campusDayKey } from './campusTime';
+import EventFilters from './EventFilters';
+import { applyFilter, isFiltering, noFilter, type EventFilter } from './listFilters';
 import { groupBySpot, loadMapEvents, type MapEvent, type Spot } from './mapEvents';
 
 if (mapboxAccessToken) {
@@ -86,6 +88,8 @@ export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, 
   const [loadError, setLoadError] = useState(false);
   const [showAll, setShowAll] = useState<Spot | null>(null);
   const [viewList, setViewList] = useState(false);
+  // Lives here because the map stays mounted: kept while the app is open, not across restarts.
+  const [listFilter, setListFilter] = useState<EventFilter>(noFilter);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Keep the lighting in step with the clock while the app stays open.
@@ -241,7 +245,9 @@ export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, 
       <EventList
         closeLabel="Close events in this view"
         events={events}
+        filter={listFilter}
         onClose={() => setViewList(false)}
+        onFilterChange={setListFilter}
         onOpen={onOpenEvent && ((id) => {
           setViewList(false);
           onOpenEvent(id);
@@ -312,6 +318,8 @@ function EventList({
   closeLabel,
   onClose,
   onOpen,
+  filter,
+  onFilterChange,
 }: {
   title: string;
   events: MapEvent[];
@@ -320,16 +328,49 @@ function EventList({
   onClose: () => void;
   // Absent while pinning a new event; rows are then plain text.
   onOpen?: (eventId: string) => void;
+  // Only the "Events in this view" list has filters.
+  filter?: EventFilter;
+  onFilterChange?: (filter: EventFilter) => void;
 }) {
+  const [now, setNow] = useState(() => new Date());
+
+  // Time windows move with the clock, so re-check them while the list is open.
+  useEffect(() => {
+    if (!visible || !filter) {
+      return;
+    }
+    setNow(new Date());
+    const timer = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(timer);
+  }, [visible, filter]);
+
+  const shown = filter ? applyFilter(events, filter, now) : events;
+  const filtered = Boolean(filter && isFiltering(filter) && events.length > 0);
+
   return (
     <Modal animationType="slide" onRequestClose={onClose} transparent visible={visible}>
       <View style={styles.sheetBackdrop}>
         <View style={styles.sheet}>
           <Text style={styles.sheetTitle}>{title}</Text>
+          {filter && onFilterChange ? <EventFilters filter={filter} onChange={onFilterChange} /> : null}
           <FlatList
-            data={events}
+            data={shown}
             keyExtractor={(event) => event.id}
-            ListEmptyComponent={<Text style={styles.rowMeta}>No events in this view</Text>}
+            ListEmptyComponent={filtered && onFilterChange ? (
+              <View style={styles.noMatch}>
+                <Text accessibilityLiveRegion="polite" style={styles.rowMeta}>No events match these filters.</Text>
+                <Pressable
+                  accessibilityLabel="Clear filters"
+                  accessibilityRole="button"
+                  onPress={() => onFilterChange(noFilter)}
+                  style={styles.clear}
+                >
+                  <Text style={styles.closeText}>Clear filters</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <Text style={styles.rowMeta}>No events in this view</Text>
+            )}
             renderItem={({ item }) => {
               const content = (
                 <>
@@ -486,6 +527,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     paddingVertical: 8,
+  },
+  noMatch: {
+    alignItems: 'flex-start',
+    gap: 4,
+  },
+  clear: {
+    justifyContent: 'center',
+    minHeight: 44,
   },
   rowPressed: {
     opacity: 0.6,
