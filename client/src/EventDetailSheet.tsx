@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   BackHandler,
-  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -27,6 +26,7 @@ import PlaceIcon from '../assets/detail/place.svg';
 import CloseIcon from '../assets/create/close.svg';
 import { loadEventDetail, type EventDetail } from './eventDetail';
 import { categoryLabel } from './categories';
+import HostAvatar from './HostAvatar';
 // Reanimated's withTiming needs the worklet easing, not core Animated's easeOut.
 import { colors, fonts, sheetEaseOut as easeOut } from './theme';
 import { formatWhen, relativeStart } from './when';
@@ -233,7 +233,8 @@ function Details({ event, now }: { event: EventDetail; now: Date }) {
         </Text>
         <Text style={styles.description}>{event.description}</Text>
         <View style={styles.host}>
-          <HostAvatar host={event.host} />
+          {/* Same colour as this host's pin on the map. */}
+          <HostAvatar host={event.host} size={28} />
           <Text style={styles.hostText}>Hosted by {event.host.displayName}</Text>
         </View>
       </View>
@@ -265,23 +266,6 @@ function Details({ event, now }: { event: EventDetail; now: Date }) {
         <Text style={styles.count}>{event.attendeeCount} going</Text>
       </View>
     </ScrollView>
-  );
-}
-
-function HostAvatar({ host }: { host: EventDetail['host'] }) {
-  if (host.avatarUrl) {
-    return <Image accessibilityIgnoresInvertColors source={{ uri: host.avatarUrl }} style={styles.avatar} />;
-  }
-  const initials = host.displayName
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((word) => word[0].toUpperCase())
-    .join('');
-  return (
-    <View style={[styles.avatar, styles.avatarFallback]}>
-      <Text style={styles.avatarText}>{initials}</Text>
-    </View>
   );
 }
 
@@ -415,21 +399,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
     gap: 10,
-  },
-  avatar: {
-    borderRadius: 14,
-    height: 28,
-    width: 28,
-  },
-  avatarFallback: {
-    alignItems: 'center',
-    backgroundColor: colors.avatar,
-    justifyContent: 'center',
-  },
-  avatarText: {
-    color: colors.white,
-    fontSize: 11,
-    fontWeight: '700',
   },
   hostText: {
     color: colors.muted,
