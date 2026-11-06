@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { FlatList, Image, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { FlatList, Image, Modal, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Mapbox, { Camera, CircleLayer, MapView, MarkerView, StyleImport, VectorSource } from '@rnmapbox/maps';
 import type { Position } from 'geojson';
@@ -7,7 +14,10 @@ import { StatusBar } from 'expo-status-bar';
 
 import { mapboxAccessToken, stevensCenter } from './config';
 import { campusDayKey } from './campusTime';
+import EventFilters from './EventFilters';
+import { applyFilter, isFiltering, noFilter, type EventFilter } from './listFilters';
 import { groupBySpot, loadMapEvents, type MapEvent, type Spot } from './mapEvents';
+import { sheetEaseOut } from './theme';
 
 if (mapboxAccessToken) {
   void Mapbox.setAccessToken(mapboxAccessToken);
@@ -86,6 +96,8 @@ export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, 
   const [loadError, setLoadError] = useState(false);
   const [showAll, setShowAll] = useState<Spot | null>(null);
   const [viewList, setViewList] = useState(false);
+  // Lives here because the map stays mounted: kept while the app is open, not across restarts.
+  const [listFilter, setListFilter] = useState<EventFilter>(noFilter);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Keep the lighting in step with the clock while the app stays open.
@@ -241,7 +253,9 @@ export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, 
       <EventList
         closeLabel="Close events in this view"
         events={events}
+        filter={listFilter}
         onClose={() => setViewList(false)}
+        onFilterChange={setListFilter}
         onOpen={onOpenEvent && ((id) => {
           setViewList(false);
           onOpenEvent(id);
@@ -312,6 +326,8 @@ function EventList({
   closeLabel,
   onClose,
   onOpen,
+  filter,
+  onFilterChange,
 }: {
   title: string;
   events: MapEvent[];
@@ -320,16 +336,105 @@ function EventList({
   onClose: () => void;
   // Absent while pinning a new event; rows are then plain text.
   onOpen?: (eventId: string) => void;
+  // Only the "Events in this view" list has filters.
+  filter?: EventFilter;
+  onFilterChange?: (filter: EventFilter) => void;
 }) {
+  const [now, setNow] = useState(() => new Date());
+  const [wasVisible, setWasVisible] = useState(visible);
+  const hasFilter = Boolean(filter);
+
+  // Refresh the clock in the same render that opens the list, so the first frame never filters
+  // against the time the list was last open.
+  if (visible !== wasVisible) {
+    setWasVisible(visible);
+    if (visible) {
+      setNow(new Date());
+    }
+  }
+
+  // Time windows move with the clock, so re-check them while the list is open. Depends on whether
+  // there is a filter, not on the filter itself, so chip taps don't restart the timer.
+  useEffect(() => {
+    if (!visible || !hasFilter) {
+      return;
+    }
+    const timer = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(timer);
+  }, [visible, hasFilter]);
+
+  const shown = filter ? applyFilter(events, filter, now) : events;
+  const filtered = Boolean(filter && isFiltering(filter) && events.length > 0);
+
+  // The dim fades in place while the sheet slides up, as in Figma 04/05. With Reduce Motion, both only fade.
+  const { height } = useWindowDimensions();
+  const reduced = useReducedMotion();
+  const dim = useSharedValue(0);
+  const offset = useSharedValue(height);
+
+  // Runs only when the list opens or closes. Re-running on a height or Reduce Motion change would
+  // restart the open animation over a close in flight, cancel it, and leave the sheet stuck open.
+  const openWith = useRef({ height, reduced });
+  openWith.current = { height, reduced };
+  useEffect(() => {
+    const { height: h, reduced: r } = openWith.current;
+    if (!visible) {
+      dim.set(0);
+      offset.set(h);
+      return;
+    }
+    dim.set(withTiming(1, { duration: 200 }));
+    offset.set(r ? 0 : withTiming(0, { duration: 300, easing: sheetEaseOut }));
+  }, [visible, dim, offset]);
+
+  // Exit is quicker than entry, and the list only unmounts once the sheet is gone.
+  function close() {
+    const done = (finished?: boolean) => {
+      'worklet';
+      if (finished) {
+        scheduleOnRN(onClose);
+      }
+    };
+    if (reduced) {
+      dim.set(withTiming(0, { duration: 150 }, done));
+      return;
+    }
+    dim.set(withTiming(0, { duration: 200 }));
+    offset.set(withTiming(height, { duration: 200, easing: sheetEaseOut }, done));
+  }
+
+  const dimStyle = useAnimatedStyle(() => ({ opacity: dim.get() }));
+  const sheetStyle = useAnimatedStyle(() => ({
+    opacity: reduced ? dim.get() : 1,
+    transform: [{ translateY: offset.get() }],
+  }));
+
   return (
-    <Modal animationType="slide" onRequestClose={onClose} transparent visible={visible}>
-      <View style={styles.sheetBackdrop}>
-        <View style={styles.sheet}>
+    <Modal animationType="none" onRequestClose={close} transparent visible={visible}>
+      <View style={styles.sheetHost}>
+        {/* Tapping the dimmed map closes the list; screen readers use the Close button instead. */}
+        <Animated.View style={[StyleSheet.absoluteFill, styles.scrim, dimStyle]}>
+          <Pressable
+            accessible={false}
+            importantForAccessibility="no"
+            onPress={close}
+            style={StyleSheet.absoluteFill}
+          />
+        </Animated.View>
+        <Animated.View style={[styles.sheet, sheetStyle]}>
           <Text style={styles.sheetTitle}>{title}</Text>
+          {filter && onFilterChange ? (
+            <EventFilters filter={filter} matching={shown.length} onChange={onFilterChange} total={events.length} />
+          ) : null}
           <FlatList
-            data={events}
+            data={shown}
             keyExtractor={(event) => event.id}
-            ListEmptyComponent={<Text style={styles.rowMeta}>No events in this view</Text>}
+            // The count line above already has the one Clear control.
+            ListEmptyComponent={filtered ? (
+              <Text accessibilityLiveRegion="polite" style={styles.rowMeta}>No events match these filters.</Text>
+            ) : (
+              <Text style={styles.rowMeta}>No events in this view</Text>
+            )}
             renderItem={({ item }) => {
               const content = (
                 <>
@@ -356,10 +461,10 @@ function EventList({
               );
             }}
           />
-          <Pressable accessibilityLabel={closeLabel} accessibilityRole="button" onPress={onClose} style={styles.close}>
+          <Pressable accessibilityLabel={closeLabel} accessibilityRole="button" onPress={close} style={styles.close}>
             <Text style={styles.closeText}>Close</Text>
           </Pressable>
-        </View>
+        </Animated.View>
       </View>
     </Modal>
   );
@@ -464,10 +569,13 @@ const styles = StyleSheet.create({
   errorText: {
     color: '#8a1f1f',
   },
-  sheetBackdrop: {
-    backgroundColor: 'rgba(0,0,0,0.35)',
+  sheetHost: {
     flex: 1,
     justifyContent: 'flex-end',
+  },
+  // Figma 04/05: ink at 36%.
+  scrim: {
+    backgroundColor: 'rgba(30,26,29,0.36)',
   },
   sheet: {
     backgroundColor: '#fff',

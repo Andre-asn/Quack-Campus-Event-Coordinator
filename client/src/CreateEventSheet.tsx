@@ -15,7 +15,6 @@ import {
 import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
-  Easing,
   Extrapolation,
   interpolate,
   useAnimatedStyle,
@@ -35,14 +34,12 @@ import PinShadow from '../assets/create/pin-shadow.svg';
 import PlaceIcon from '../assets/create/place.svg';
 import type { PinnedPlace } from './CampusMap';
 import { createEvent, type FieldErrors } from './events';
-import { colors, fonts } from './theme';
+import { categories, categoryLabel, type Category } from './categories';
+import { colors, fonts, sheetEaseOut as EASE_OUT } from './theme';
 import { formatWhen } from './when';
 
-const categories = ['study', 'food', 'sports', 'games', 'movie', 'music', 'other'] as const;
-type Category = (typeof categories)[number];
 type FieldName = 'title' | 'description' | 'label';
 
-const EASE_OUT = Easing.bezier(0.23, 1, 0.32, 1);
 const SHEET_SPRING = { duration: 300, dampingRatio: 0.8 };
 
 // Where a flick would come to rest, so a quick short swipe still snaps.
@@ -415,7 +412,7 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
               <View accessibilityLabel="Category" accessibilityRole="radiogroup" style={styles.chips}>
                 {categories.map((name) => {
                   const selected = category === name;
-                  const text = name[0].toUpperCase() + name.slice(1);
+                  const text = categoryLabel(name);
                   return (
                     <Pressable
                       accessibilityLabel={text}
