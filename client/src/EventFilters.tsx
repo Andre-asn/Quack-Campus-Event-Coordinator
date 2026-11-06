@@ -1,8 +1,6 @@
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
-  cubicBezier,
-  Easing,
   FadeIn,
   FadeOut,
   LinearTransition,
@@ -10,24 +8,22 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import CheckIcon from '../assets/create/check.svg';
+import { categories, categoryLabel, type Category } from './categories';
 import {
-  categories,
-  categoryLabel,
   isFiltering,
   noFilter,
   timeWindowAccessibilityLabels,
   timeWindowLabels,
   timeWindows,
-  type Category,
   type EventFilter,
 } from './listFilters';
-import { colors } from './theme';
-
 // Strong ease-out for state changes, ease-in-out for the pill moving across the track.
-const EASE_OUT = cubicBezier(0.23, 1, 0.32, 1);
-const EASE_IN_OUT = cubicBezier(0.77, 0, 0.175, 1);
-// Layout animations take a worklet easing rather than a CSS one; same curve.
-const LAYOUT_EASE_OUT = Easing.bezier(0.23, 1, 0.32, 1);
+import {
+  colors,
+  cssEaseInOut as EASE_IN_OUT,
+  cssEaseOut as EASE_OUT,
+  sheetEaseOut as LAYOUT_EASE_OUT,
+} from './theme';
 // Filters change tens of times a session, so motion stays near-imperceptible.
 const STATE_MS = 140;
 const PILL_MS = 150;
@@ -67,7 +63,8 @@ export default function EventFilters({ filter, onChange, matching, total }: Prop
           />
         ))}
       </View>
-      {isFiltering(filter) ? (
+      {/* An empty view has nothing to filter, so "0 of 0 · Clear" would only confuse. */}
+      {isFiltering(filter) && total > 0 ? (
         <Animated.View
           entering={FadeIn.duration(STATE_MS)}
           exiting={FadeOut.duration(100)}

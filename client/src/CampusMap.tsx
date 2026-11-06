@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { FlatList, Image, Modal, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import Animated, {
-  Easing,
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
@@ -18,15 +17,13 @@ import { campusDayKey } from './campusTime';
 import EventFilters from './EventFilters';
 import { applyFilter, isFiltering, noFilter, type EventFilter } from './listFilters';
 import { groupBySpot, loadMapEvents, type MapEvent, type Spot } from './mapEvents';
+import { sheetEaseOut } from './theme';
 
 if (mapboxAccessToken) {
   void Mapbox.setAccessToken(mapboxAccessToken);
   // CLAUDE.md: no analytics or third-party tracking.
   Mapbox.setTelemetryEnabled(false);
 }
-
-// Same curve as the create and detail sheets.
-const SHEET_EASE = Easing.bezier(0.23, 1, 0.32, 1);
 
 // Mapbox Standard draws 3D buildings and supports dawn/day/dusk/night lighting.
 const standardStyle = 'mapbox://styles/mapbox/standard';
@@ -344,16 +341,27 @@ function EventList({
   onFilterChange?: (filter: EventFilter) => void;
 }) {
   const [now, setNow] = useState(() => new Date());
+  const [wasVisible, setWasVisible] = useState(visible);
+  const hasFilter = Boolean(filter);
 
-  // Time windows move with the clock, so re-check them while the list is open.
+  // Refresh the clock in the same render that opens the list, so the first frame never filters
+  // against the time the list was last open.
+  if (visible !== wasVisible) {
+    setWasVisible(visible);
+    if (visible) {
+      setNow(new Date());
+    }
+  }
+
+  // Time windows move with the clock, so re-check them while the list is open. Depends on whether
+  // there is a filter, not on the filter itself, so chip taps don't restart the timer.
   useEffect(() => {
-    if (!visible || !filter) {
+    if (!visible || !hasFilter) {
       return;
     }
-    setNow(new Date());
     const timer = setInterval(() => setNow(new Date()), 30_000);
     return () => clearInterval(timer);
-  }, [visible, filter]);
+  }, [visible, hasFilter]);
 
   const shown = filter ? applyFilter(events, filter, now) : events;
   const filtered = Boolean(filter && isFiltering(filter) && events.length > 0);
@@ -364,15 +372,20 @@ function EventList({
   const dim = useSharedValue(0);
   const offset = useSharedValue(height);
 
+  // Runs only when the list opens or closes. Re-running on a height or Reduce Motion change would
+  // restart the open animation over a close in flight, cancel it, and leave the sheet stuck open.
+  const openWith = useRef({ height, reduced });
+  openWith.current = { height, reduced };
   useEffect(() => {
+    const { height: h, reduced: r } = openWith.current;
     if (!visible) {
       dim.set(0);
-      offset.set(height);
+      offset.set(h);
       return;
     }
     dim.set(withTiming(1, { duration: 200 }));
-    offset.set(reduced ? 0 : withTiming(0, { duration: 300, easing: SHEET_EASE }));
-  }, [visible, reduced, height, dim, offset]);
+    offset.set(r ? 0 : withTiming(0, { duration: 300, easing: sheetEaseOut }));
+  }, [visible, dim, offset]);
 
   // Exit is quicker than entry, and the list only unmounts once the sheet is gone.
   function close() {
@@ -387,7 +400,7 @@ function EventList({
       return;
     }
     dim.set(withTiming(0, { duration: 200 }));
-    offset.set(withTiming(height, { duration: 200, easing: SHEET_EASE }, done));
+    offset.set(withTiming(height, { duration: 200, easing: sheetEaseOut }, done));
   }
 
   const dimStyle = useAnimatedStyle(() => ({ opacity: dim.get() }));
