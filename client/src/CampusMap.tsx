@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { FlatList, Image, Modal, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { FlatList, Modal, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useReducedMotion,
@@ -17,7 +17,11 @@ import { campusDayKey } from './campusTime';
 import EventFilters from './EventFilters';
 import { applyFilter, isFiltering, noFilter, type EventFilter } from './listFilters';
 import { groupBySpot, loadMapEvents, type MapEvent, type Spot } from './mapEvents';
-import { sheetEaseOut } from './theme';
+import PointerWhite from '../assets/signin/pin-pointer-white.svg';
+import PointerYellow from '../assets/signin/pin-pointer-yellow.svg';
+import Dots from '../assets/map/dots.svg';
+import HostAvatar from './HostAvatar';
+import { colors, fonts, sheetEaseOut } from './theme';
 import TopBar, { TOP_BAR_GAP, TOP_BAR_HEIGHT, type Account } from './TopBar';
 
 if (mapboxAccessToken) {
@@ -101,6 +105,8 @@ export default function CampusMap({
   const [failed, setFailed] = useState(false);
   const [lightPreset, setLightPreset] = useState(() => lightPresetFor(new Date().getHours()));
   const [day, setDay] = useState(() => campusDayKey(new Date()));
+  // Ticks with the lighting timer, so a pin turns to "Now" within a minute of its start.
+  const [now, setNow] = useState(() => new Date());
   const [bbox, setBbox] = useState<string | null>(null);
   const [events, setEvents] = useState<MapEvent[]>([]);
   // False until the first query answers, so the top bar doesn't claim "0 events today" while loading.
@@ -118,6 +124,7 @@ export default function CampusMap({
       const now = new Date();
       setLightPreset(lightPresetFor(now.getHours()));
       setDay(campusDayKey(now));
+      setNow(now);
     }, 60_000);
     return () => clearInterval(timer);
   }, []);
@@ -234,9 +241,12 @@ export default function CampusMap({
           <MarkerView
             key={`${spot.latitude},${spot.longitude}`}
             allowOverlap
+            // The pointer's tip, at the bottom center, sits on the spot.
+            anchor={{ x: 0.5, y: 1 }}
             coordinate={[spot.longitude, spot.latitude]}
           >
             <SpotBubble
+              now={now}
               onOpen={onOpenEvent}
               onShowAll={() => setShowAll(spot)}
               spot={spot}
@@ -285,53 +295,82 @@ export default function CampusMap({
   );
 }
 
+function startTime(event: MapEvent): string {
+  return new Date(event.startsAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+function hasStarted(event: MapEvent, now: Date): boolean {
+  return new Date(event.startsAt).getTime() <= now.getTime();
+}
+
+function pinLabel(event: MapEvent, now: Date): string {
+  const when = hasStarted(event, now) ? `started at ${startTime(event)}` : `starts at ${startTime(event)}`;
+  return `${event.title}, hosted by ${event.host.displayName}, ${when}`;
+}
+
+// Figma 03. One event: a time tag (host + start time, yellow "Now" once started). Several: up to
+// three overlapping hosts and a dark "…" that opens Show all. Both point at the spot.
 function SpotBubble({
   spot,
+  now,
   onOpen,
   onShowAll,
 }: {
   spot: Spot;
-  // Absent while pinning a new event; a bubble then opens Show all, as before the detail sheet.
+  now: Date;
+  // Absent while pinning a new event; a tap then opens Show all, as before the detail sheet.
   onOpen?: (eventId: string) => void;
   onShowAll: () => void;
 }) {
-  const visible = spot.events.slice(0, 3);
-  const overflow = spot.events.length > 3;
-  return (
-    <View style={styles.bubbles}>
-      {visible.map((event, index) => (
-        <Pressable
-          accessibilityHint={onOpen ? 'Opens event details' : 'Shows the events here'}
-          accessibilityLabel={`${event.title}, hosted by ${event.host.displayName}`}
-          accessibilityRole="button"
-          key={event.id}
-          onPress={onOpen ? () => onOpen(event.id) : onShowAll}
-        >
-          <Avatar event={event} overlap={index > 0} />
-        </Pressable>
-      ))}
-      {overflow ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Show all"
-          onPress={onShowAll}
-          style={styles.ellipsis}
-        >
-          <Text style={styles.ellipsisText}>...</Text>
-        </Pressable>
-      ) : null}
-    </View>
-  );
-}
+  const hint = onOpen ? 'Opens event details' : 'Shows the events here';
 
-function Avatar({ event, overlap = false }: { event: MapEvent; overlap?: boolean }) {
-  const shift = overlap ? styles.overlap : null;
-  if (event.host.avatarUrl) {
-    return <Image accessibilityLabel={event.host.displayName} source={{ uri: event.host.avatarUrl }} style={[styles.avatar, shift]} />;
+  if (spot.events.length === 1) {
+    const event = spot.events[0];
+    const started = hasStarted(event, now);
+    return (
+      <View style={styles.pin}>
+        <Pressable
+          accessibilityHint={hint}
+          accessibilityLabel={pinLabel(event, now)}
+          accessibilityRole="button"
+          onPress={onOpen ? () => onOpen(event.id) : onShowAll}
+          style={({ pressed }) => [styles.tag, started && styles.tagNow, pressed && styles.pinPressed]}
+        >
+          <HostAvatar host={event.host} size={24} />
+          <Text style={styles.tagText}>{started ? 'Now' : startTime(event)}</Text>
+        </Pressable>
+        {started ? <PointerYellow height={7} width={12} /> : <PointerWhite height={7} width={12} />}
+      </View>
+    );
   }
+
+  const visible = spot.events.slice(0, 3);
   return (
-    <View accessibilityLabel={event.host.displayName} style={[styles.avatarFallback, shift]}>
-      <Text style={styles.fallbackText}>{event.host.displayName.slice(0, 1)}</Text>
+    <View style={styles.pin}>
+      <View style={styles.cluster}>
+        {visible.map((event) => (
+          <Pressable
+            accessibilityHint={hint}
+            accessibilityLabel={pinLabel(event, now)}
+            accessibilityRole="button"
+            key={event.id}
+            onPress={onOpen ? () => onOpen(event.id) : onShowAll}
+            style={({ pressed }) => [styles.clusterAvatar, pressed && styles.pinPressed]}
+          >
+            <HostAvatar host={event.host} ringed size={28} />
+          </Pressable>
+        ))}
+        <Pressable
+          accessibilityLabel={`Show all ${spot.events.length} events here`}
+          accessibilityRole="button"
+          hitSlop={6}
+          onPress={onShowAll}
+          style={({ pressed }) => [styles.dotsBubble, pressed && styles.pinPressed]}
+        >
+          <Dots height={4} width={18} />
+        </Pressable>
+      </View>
+      <PointerWhite height={7} width={12} />
     </View>
   );
 }
@@ -455,7 +494,7 @@ function EventList({
             renderItem={({ item }) => {
               const content = (
                 <>
-                  <Avatar event={item} />
+                  <HostAvatar host={item.host} size={32} />
                   <View style={styles.rowText}>
                     <Text style={styles.rowTitle}>{item.title}</Text>
                     <Text style={styles.rowMeta}>{item.host.displayName}</Text>
@@ -516,49 +555,62 @@ const styles = StyleSheet.create({
     maxWidth: 320,
     textAlign: 'center',
   },
-  bubbles: {
+  // The pointer's tip is the bottom-center of this column, which the marker anchors on the spot.
+  pin: {
+    alignItems: 'center',
+  },
+  tag: {
+    alignItems: 'center',
+    backgroundColor: colors.white,
+    borderRadius: 20,
+    elevation: 4,
     flexDirection: 'row',
+    gap: 6,
+    paddingBottom: 4,
+    paddingLeft: 4,
+    paddingRight: 12,
+    paddingTop: 4,
+    shadowColor: '#1F0F14',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
   },
-  avatar: {
-    borderColor: '#fff',
-    borderRadius: 16,
-    borderWidth: 2,
-    height: 32,
-    width: 32,
+  tagNow: {
+    backgroundColor: colors.yellow,
   },
-  overlap: {
-    marginLeft: -6,
+  tagText: {
+    color: colors.ink,
+    fontFamily: fonts.displayBold,
+    fontSize: 13,
   },
-  avatarFallback: {
+  cluster: {
     alignItems: 'center',
-    backgroundColor: '#111',
-    borderColor: '#fff',
-    borderRadius: 16,
-    borderWidth: 2,
-    height: 32,
-    justifyContent: 'center',
-    width: 32,
+    backgroundColor: colors.white,
+    borderRadius: 22,
+    elevation: 4,
+    flexDirection: 'row',
+    padding: 4,
+    shadowColor: '#1F0F14',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
   },
-  fallbackText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '700',
+  clusterAvatar: {
+    marginRight: -8,
   },
-  ellipsis: {
+  dotsBubble: {
     alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    elevation: 2,
-    height: 32,
+    backgroundColor: colors.ink,
+    borderColor: colors.white,
+    borderRadius: 14,
+    borderWidth: 2,
+    height: 28,
     justifyContent: 'center',
-    marginLeft: -6,
-    width: 32,
+    width: 28,
   },
-  ellipsisText: {
-    color: '#111',
-    fontSize: 16,
-    fontWeight: '700',
-    marginTop: -6,
+  pinPressed: {
+    opacity: 0.85,
+    transform: [{ scale: 0.97 }],
   },
   empty: {
     alignSelf: 'center',
