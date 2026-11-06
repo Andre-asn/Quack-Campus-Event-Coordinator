@@ -6,6 +6,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -34,12 +35,17 @@ import CloseIcon from '../assets/create/close.svg';
 import PinShadow from '../assets/create/pin-shadow.svg';
 import PlaceIcon from '../assets/create/place.svg';
 import type { PinnedPlace } from './CampusMap';
-import { createEvent, type FieldErrors } from './events';
+import { createEvent, eventShareLink, type FieldErrors } from './events';
 import { colors, fonts } from './theme';
 import { formatWhen } from './when';
 
 const categories = ['study', 'food', 'sports', 'games', 'movie', 'music', 'other'] as const;
 type Category = (typeof categories)[number];
+type Visibility = 'public' | 'link_only';
+const visibilities: { value: Visibility; label: string }[] = [
+  { value: 'public', label: 'Public' },
+  { value: 'link_only', label: 'Link only' },
+];
 type FieldName = 'title' | 'description' | 'label';
 
 const EASE_OUT = Easing.bezier(0.23, 1, 0.32, 1);
@@ -127,6 +133,8 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState<Category | null>(null);
+  const [visibility, setVisibility] = useState<Visibility>('public');
+  const [shareLink, setShareLink] = useState<string | null>(null);
   // null until the host types, so the label keeps following the map as the pin moves.
   const [typedLabel, setTypedLabel] = useState<string | null>(null);
   const [focused, setFocused] = useState<FieldName | null>(null);
@@ -229,7 +237,8 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
 
   const suggestedLabel = place?.name ?? '';
   const label = typedLabel ?? suggestedLabel;
-  const ready = Boolean(title.trim() && description.trim() && category && label.trim() && place) && !busy;
+  const locked = busy || shareLink !== null;
+  const ready = Boolean(title.trim() && description.trim() && category && label.trim() && place) && !locked;
   const when = formatWhen(startsAt);
   const until = formatWhen(endsAt);
   // The pin has no input of its own, so its errors show under "Where exactly?".
@@ -239,7 +248,7 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
   const whereError = fieldErrors.locationLabel ?? pinError;
   const anyFieldShown = Boolean(
     fieldErrors.title || fieldErrors.description || fieldErrors.category || fieldErrors.startsAt
-      || fieldErrors.endsAt || whereError,
+      || fieldErrors.endsAt || fieldErrors.visibility || whereError,
   );
   // E.g. the pin moved while posting: its error no longer shows, so the banner explains the failure.
   const banner = error && (!errorHasFields || (Object.keys(fieldErrors).length > 0 && !anyFieldShown))
@@ -247,6 +256,10 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
     : null;
 
   async function post() {
+    if (shareLink) {
+      leave(onPosted);
+      return;
+    }
     if (!place || !category) {
       return;
     }
@@ -270,8 +283,15 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
       locationLabel: label.trim(),
       startsAt: startsAt.toISOString(),
       endsAt: endsAt.toISOString(),
+      visibility,
     });
     if (outcome.ok) {
+      if (outcome.event.visibility === 'link_only' && outcome.event.shareToken) {
+        setShareLink(eventShareLink(outcome.event.id, outcome.event.shareToken));
+        setBusy(false);
+        AccessibilityInfo.announceForAccessibility('Event posted. Share the link to invite people.');
+        return;
+      }
       AccessibilityInfo.announceForAccessibility('Event posted');
       leave(onPosted);
       return;
@@ -289,7 +309,7 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
       onBlur: () => setFocused(null),
       onFocus: () => setFocused(name),
       // Locked while posting, so a reply can't pin an old error on a field the host already fixed.
-      editable: !busy,
+      editable: !locked,
       placeholderTextColor: colors.muted,
       style: [styles.input, focused === name && styles.inputFocused],
     };
@@ -420,8 +440,8 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
                     <Pressable
                       accessibilityLabel={text}
                       accessibilityRole="radio"
-                      accessibilityState={{ checked: selected, disabled: busy }}
-                      disabled={busy}
+                      accessibilityState={{ checked: selected, disabled: locked }}
+                      disabled={locked}
                       key={name}
                       onPress={() => {
                         setCategory(name);
@@ -445,7 +465,7 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
                   <ClockIcon height={20} width={20} />
                   <DateTimePicker
                     accessibilityLabel={`When: ${when}`}
-                    disabled={busy}
+                    disabled={locked}
                     display="compact"
                     maximumDate={new Date(Date.now() + MAX_AHEAD_MS)}
                     minimumDate={new Date()}
@@ -466,8 +486,8 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
                   accessibilityHint="Opens a date and time picker"
                   accessibilityLabel={`When: ${when}`}
                   accessibilityRole="button"
-                  accessibilityState={{ disabled: busy }}
-                  disabled={busy}
+                  accessibilityState={{ disabled: locked }}
+                  disabled={locked}
                   onPress={() => pickOnAndroid(startsAt, (date) => {
                     setStartsAt(date);
                     if (endsAt.getTime() <= date.getTime()) {
@@ -541,22 +561,78 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
                 />
               </View>
             </Field>
+
+            <View style={styles.field}>
+              <Text style={styles.label}>Who can find it?</Text>
+              <View accessibilityLabel="Who can find it?" accessibilityRole="radiogroup" style={styles.chips}>
+                {visibilities.map((option) => {
+                  const selected = visibility === option.value;
+                  return (
+                    <Pressable
+                      accessibilityLabel={option.label}
+                      accessibilityRole="radio"
+                      accessibilityState={{ checked: selected, disabled: locked }}
+                      disabled={locked}
+                      key={option.value}
+                      onPress={() => {
+                        setVisibility(option.value);
+                        clearErrors('visibility');
+                      }}
+                      style={({ pressed }) => [styles.chip, selected && styles.chipSelected, pressed && styles.pressed]}
+                    >
+                      {selected ? <CheckIcon height={18} width={18} /> : null}
+                      <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{option.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {fieldErrors.visibility ? (
+                <FieldError message={fieldErrors.visibility} />
+              ) : (
+                <Text style={styles.help}>
+                  {visibility === 'public'
+                    ? 'Shows on the map. This is the usual choice.'
+                    : 'Stays off the map. Only people with the link can open it.'}
+                </Text>
+              )}
+            </View>
           </ScrollView>
 
-          {banner ? (
+          {shareLink ? (
+            <View style={styles.shareBox}>
+              <Text style={styles.help}>
+                People with Quack! open the event. Anyone else sees that the app isn't installed.
+              </Text>
+              <Text accessibilityLabel="Share link" selectable style={styles.shareLink}>
+                {shareLink}
+              </Text>
+              <Pressable
+                accessibilityLabel="Share link"
+                accessibilityRole="button"
+                onPress={() => void Share.share({ message: shareLink })}
+                style={({ pressed }) => [styles.share, pressed && styles.pressed]}
+              >
+                <Text style={styles.shareText}>Share link</Text>
+              </Pressable>
+            </View>
+          ) : banner ? (
             <Text accessibilityLiveRegion="polite" accessibilityRole="alert" style={styles.error}>
               {banner}
             </Text>
           ) : null}
           <Pressable
-            accessibilityLabel="Post event"
+            accessibilityLabel={shareLink ? 'Done' : 'Post event'}
             accessibilityRole="button"
-            accessibilityState={{ busy, disabled: !ready }}
-            disabled={!ready}
+            accessibilityState={{ busy, disabled: shareLink ? false : !ready }}
+            disabled={shareLink ? false : !ready}
             onPress={() => void post()}
-            style={({ pressed }) => [styles.post, !ready && styles.postDisabled, pressed && styles.pressed]}
+            style={({ pressed }) => [
+              styles.post,
+              !shareLink && !ready && styles.postDisabled,
+              pressed && styles.pressed,
+            ]}
           >
-            <Text style={styles.postText}>{busy ? 'Posting...' : 'Post event'}</Text>
+            <Text style={styles.postText}>{shareLink ? 'Done' : busy ? 'Posting...' : 'Post event'}</Text>
           </Pressable>
         </Animated.View>
       </KeyboardAvoidingView>
@@ -771,6 +847,26 @@ const styles = StyleSheet.create({
   error: {
     color: colors.red,
     fontSize: 14,
+  },
+  shareBox: {
+    gap: 8,
+  },
+  shareLink: {
+    color: colors.ink,
+    fontSize: 13,
+  },
+  share: {
+    alignItems: 'center',
+    borderColor: colors.red,
+    borderRadius: 28,
+    borderWidth: 1,
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  shareText: {
+    color: colors.redDeep,
+    fontSize: 16,
+    fontWeight: '600',
   },
   post: {
     alignItems: 'center',

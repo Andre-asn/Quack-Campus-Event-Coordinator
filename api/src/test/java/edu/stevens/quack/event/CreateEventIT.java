@@ -3,6 +3,7 @@ package edu.stevens.quack.event;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.List;
@@ -271,6 +272,75 @@ class CreateEventIT extends PostgresIntegrationTest {
             body.jsonPath("$.errors[?(@.field == '" + field + "' && @.code == 'REQUIRED')]").isNotEmpty();
         }
         assertNoEvents();
+    }
+
+    @Test
+    void defaultsAnOmittedVisibilityToPublicWithoutAShareToken() {
+        User host = signIn();
+
+        post(host, valid(Map.of()))
+                .expectStatus().isCreated()
+                .expectBody()
+                .jsonPath("$.visibility").isEqualTo("public")
+                .jsonPath("$.shareToken").doesNotExist();
+
+        assertThat(jdbc.queryForObject("select visibility from events", String.class)).isEqualTo("public");
+        assertThat(jdbc.queryForObject("select share_token from events", UUID.class)).isNull();
+    }
+
+    @Test
+    void persistsLinkOnlyAndReturnsTheShareTokenToTheHost() {
+        User host = signIn();
+
+        var body = post(host, valid(Map.of("visibility", "link_only")))
+                .expectStatus().isCreated()
+                .expectBody();
+        String stored = jdbc.queryForObject("select share_token::text from events", String.class);
+
+        body.jsonPath("$.visibility").isEqualTo("link_only")
+                .jsonPath("$.shareToken").isEqualTo(stored);
+        assertThat(stored).isNotBlank();
+        assertThat(jdbc.queryForObject("select visibility from events", String.class)).isEqualTo("link_only");
+    }
+
+    @Test
+    void rejectsAnyVisibilityOtherThanPublicOrLinkOnly() {
+        User host = signIn();
+
+        expectInvalid(post(host, valid(Map.of("visibility", "friends"))), "visibility", "INVALID_VISIBILITY");
+    }
+
+    @Test
+    void showsALinkOnlyEventOnTheHostsMapOnly() {
+        User host = signIn();
+        User other = authService.signIn(new GoogleIdentity("sub-2", "bea@stevens.edu", true, "Bea", null));
+        post(host, valid(Map.of("visibility", "link_only"))).expectStatus().isCreated();
+        Instant from = LocalDate.now(EventService.CAMPUS).atStartOfDay(EventService.CAMPUS).toInstant();
+        Instant to = LocalDate.now(EventService.CAMPUS).plusDays(2).atStartOfDay(EventService.CAMPUS).toInstant();
+
+        client.get().uri(builder -> mapQuery(builder, from, to))
+                .header(HttpHeaders.COOKIE, "JSESSIONID=" + sessionFor(host))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.events.length()").isEqualTo(1)
+                .jsonPath("$.events[0].visibility").isEqualTo("link_only");
+
+        client.get().uri(builder -> mapQuery(builder, from, to))
+                .header(HttpHeaders.COOKIE, "JSESSIONID=" + sessionFor(other))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.events.length()").isEqualTo(0);
+    }
+
+    private static java.net.URI mapQuery(org.springframework.web.util.UriBuilder builder, Instant from, Instant to) {
+        return builder.path("/api/v1/events")
+                .queryParam("bbox", "-74.03,40.74,-74.02,40.75")
+                .queryParam("from", from.toString())
+                .queryParam("to", to.toString())
+                .queryParam("limit", "50")
+                .build();
     }
 
     private User signIn() {

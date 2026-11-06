@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import edu.stevens.quack.event.EventNotFoundException;
+import edu.stevens.quack.event.EventStateException;
 import edu.stevens.quack.event.InvalidEventException;
 import edu.stevens.quack.event.MapQueryException;
 
@@ -41,6 +42,21 @@ public class RequestExceptionHandler {
     ResponseEntity<ProblemDetail> eventNotFound(EventNotFoundException ex) {
         ProblemDetail problem = ApiProblems.of(
                 HttpStatus.NOT_FOUND, "EVENT_NOT_FOUND", "Event not found", ex.getMessage());
+        return ResponseEntity.status(problem.getStatus())
+                .contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                .body(problem);
+    }
+
+    @ExceptionHandler(EventStateException.class)
+    ResponseEntity<ProblemDetail> eventState(EventStateException ex) {
+        HttpStatus status = ex.status();
+        String title = switch (status) {
+            case NOT_FOUND -> "Not found";
+            case FORBIDDEN -> "Forbidden";
+            case CONFLICT -> "Conflict";
+            default -> "Event request failed";
+        };
+        ProblemDetail problem = ApiProblems.of(status, ex.code(), title, ex.getMessage());
         return ResponseEntity.status(problem.getStatus())
                 .contentType(MediaType.APPLICATION_PROBLEM_JSON)
                 .body(problem);

@@ -5,6 +5,7 @@ import {
   Image,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   View,
@@ -25,13 +26,15 @@ import ClockIcon from '../assets/detail/clock.svg';
 import PeopleIcon from '../assets/detail/people.svg';
 import PlaceIcon from '../assets/detail/place.svg';
 import CloseIcon from '../assets/create/close.svg';
-import { loadEventDetail, type EventDetail } from './eventDetail';
+import { loadEventDetail, setAttendance, type EventDetail } from './eventDetail';
+import { eventShareLink } from './events';
 import { colors, easeOut, fonts } from './theme';
 import { formatWhen, relativeStart } from './when';
 
 type Props = {
   sessionId: string;
   eventId: string;
+  token?: string | null;
   onClose: () => void;
 };
 
@@ -42,13 +45,15 @@ type State =
 
 // Frame 06 "Event detail: not joined" in the Quack! Figma redesign. The map stays mounted under the
 // sheet and its camera is never touched, so dismissing returns to the same view.
-export default function EventDetailSheet({ sessionId, eventId, onClose }: Props) {
+export default function EventDetailSheet({ sessionId, eventId, token, onClose }: Props) {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const reduced = useReducedMotion();
   const [state, setState] = useState<State>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0);
   const [now, setNow] = useState(() => new Date());
+  const [pending, setPending] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const offset = useSharedValue(reduced ? 0 : windowHeight);
   const opacity = useSharedValue(reduced ? 0 : 1);
@@ -68,7 +73,9 @@ export default function EventDetailSheet({ sessionId, eventId, onClose }: Props)
     const controller = new AbortController();
     let cancelled = false;
     setState({ status: 'loading' });
-    loadEventDetail(sessionId, eventId, controller.signal)
+    setPending(false);
+    setActionError(null);
+    loadEventDetail(sessionId, eventId, controller.signal, token)
       .then((result) => {
         if (cancelled) {
           return;
@@ -86,7 +93,31 @@ export default function EventDetailSheet({ sessionId, eventId, onClose }: Props)
       cancelled = true;
       controller.abort();
     };
-  }, [sessionId, eventId, attempt]);
+  }, [sessionId, eventId, token, attempt]);
+
+  async function changeAttendance(event: EventDetail) {
+    if (pending) {
+      return;
+    }
+    const joining = !event.joined;
+    setPending(true);
+    setActionError(null);
+    const outcome = await setAttendance(sessionId, eventId, joining, token ?? event.shareToken);
+    if (!outcome.ok) {
+      setPending(false);
+      setActionError(outcome.message);
+      return;
+    }
+    setPending(false);
+    setState({
+      status: 'loaded',
+      event: {
+        ...event,
+        joined: joining,
+        attendeeCount: event.attendeeCount + (joining ? 1 : -1),
+      },
+    });
+  }
 
   // Keeps "Starts in 25 min" honest while the sheet stays open.
   useEffect(() => {
@@ -164,7 +195,13 @@ export default function EventDetailSheet({ sessionId, eventId, onClose }: Props)
       </GestureDetector>
 
       {state.status === 'loaded' ? (
-        <Details event={state.event} now={now} />
+        <Details
+          actionError={actionError}
+          event={state.event}
+          now={now}
+          onAttendance={() => void changeAttendance(state.event)}
+          pending={pending}
+        />
       ) : state.status === 'loading' ? (
         <View accessibilityLabel="Loading event" style={styles.placeholder}>
           <ActivityIndicator color={colors.red} />
@@ -200,7 +237,19 @@ export default function EventDetailSheet({ sessionId, eventId, onClose }: Props)
   );
 }
 
-function Details({ event, now }: { event: EventDetail; now: Date }) {
+function Details({
+  event,
+  now,
+  pending,
+  actionError,
+  onAttendance,
+}: {
+  event: EventDetail;
+  now: Date;
+  pending: boolean;
+  actionError: string | null;
+  onAttendance: () => void;
+}) {
   const startsAt = new Date(event.startsAt);
   const cancelled = event.status === 'cancelled';
   const relative = relativeStart(startsAt, now);
@@ -262,6 +311,36 @@ function Details({ event, now }: { event: EventDetail; now: Date }) {
         <PeopleIcon height={22} width={22} />
         <Text style={styles.count}>{event.attendeeCount} going</Text>
       </View>
+
+      {event.status === 'active' || event.joined ? (
+        <Pressable
+          accessibilityLabel={event.joined ? 'Leave' : 'Join'}
+          accessibilityRole="button"
+          accessibilityState={{ busy: pending, disabled: pending }}
+          disabled={pending}
+          onPress={onAttendance}
+          style={({ pressed }) => [styles.join, pressed && styles.pressed]}
+        >
+          <Text style={styles.joinText}>
+            {pending ? (event.joined ? 'Leaving...' : 'Joining...') : (event.joined ? 'Leave' : 'Join')}
+          </Text>
+        </Pressable>
+      ) : null}
+      {actionError ? (
+        <Text accessibilityLiveRegion="polite" accessibilityRole="alert" style={styles.actionError}>
+          {actionError}
+        </Text>
+      ) : null}
+      {event.shareToken ? (
+        <Pressable
+          accessibilityLabel="Share link"
+          accessibilityRole="button"
+          onPress={() => void Share.share({ message: eventShareLink(event.id, event.shareToken ?? '') })}
+          style={({ pressed }) => [styles.share, pressed && styles.pressed]}
+        >
+          <Text style={styles.shareText}>Share link</Text>
+        </Pressable>
+      ) : null}
     </ScrollView>
   );
 }
@@ -473,6 +552,38 @@ const styles = StyleSheet.create({
     color: colors.ink,
     fontFamily: fonts.displayBold,
     fontSize: 18,
+  },
+  join: {
+    alignItems: 'center',
+    backgroundColor: colors.red,
+    borderRadius: 28,
+    justifyContent: 'center',
+    marginTop: 20,
+    minHeight: 52,
+  },
+  joinText: {
+    color: colors.white,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  actionError: {
+    color: colors.red,
+    fontSize: 14,
+    marginTop: 8,
+  },
+  share: {
+    alignItems: 'center',
+    borderColor: colors.red,
+    borderRadius: 28,
+    borderWidth: 1,
+    justifyContent: 'center',
+    marginTop: 12,
+    minHeight: 44,
+  },
+  shareText: {
+    color: colors.redDeep,
+    fontSize: 16,
+    fontWeight: '600',
   },
   pressed: {
     opacity: 0.85,

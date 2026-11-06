@@ -6,6 +6,7 @@ import type { Position } from 'geojson';
 import { StatusBar } from 'expo-status-bar';
 
 import { mapboxAccessToken, stevensCenter } from './config';
+import { colors } from './theme';
 import { campusDayKey } from './campusTime';
 import { groupBySpot, loadMapEvents, type MapEvent, type Spot } from './mapEvents';
 
@@ -41,7 +42,7 @@ type Props = {
   bottomInset?: number;
   onPinMoved?: (place: PinnedPlace) => void;
   // Tapping a host bubble, or a row in a list, opens that event's detail sheet.
-  onOpenEvent?: (eventId: string) => void;
+  onOpenEvent?: (eventId: string, token?: string) => void;
 };
 
 // Standard keeps its place labels inside an imported style that queries cannot reach, so an
@@ -231,9 +232,9 @@ export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, 
         closeLabel="Close show all"
         events={showAll?.events ?? []}
         onClose={() => setShowAll(null)}
-        onOpen={onOpenEvent && ((id) => {
+        onOpen={onOpenEvent && ((id, token) => {
           setShowAll(null);
-          onOpenEvent(id);
+          onOpenEvent(id, token);
         })}
         title="Show all"
         visible={showAll !== null}
@@ -242,9 +243,9 @@ export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, 
         closeLabel="Close events in this view"
         events={events}
         onClose={() => setViewList(false)}
-        onOpen={onOpenEvent && ((id) => {
+        onOpen={onOpenEvent && ((id, token) => {
           setViewList(false);
-          onOpenEvent(id);
+          onOpenEvent(id, token);
         })}
         title="Events in this view"
         visible={viewList}
@@ -261,7 +262,7 @@ function SpotBubble({
 }: {
   spot: Spot;
   // Absent while pinning a new event; a bubble then opens Show all, as before the detail sheet.
-  onOpen?: (eventId: string) => void;
+  onOpen?: (eventId: string, token?: string) => void;
   onShowAll: () => void;
 }) {
   const visible = spot.events.slice(0, 3);
@@ -271,10 +272,10 @@ function SpotBubble({
       {visible.map((event, index) => (
         <Pressable
           accessibilityHint={onOpen ? 'Opens event details' : 'Shows the events here'}
-          accessibilityLabel={`${event.title}, hosted by ${event.host.displayName}`}
+          accessibilityLabel={`${event.visibility === 'link_only' ? 'Link only. ' : ''}${event.title}, hosted by ${event.host.displayName}`}
           accessibilityRole="button"
           key={event.id}
-          onPress={onOpen ? () => onOpen(event.id) : onShowAll}
+          onPress={onOpen ? () => onOpen(event.id, event.shareToken ?? undefined) : onShowAll}
         >
           <Avatar event={event} overlap={index > 0} />
         </Pressable>
@@ -295,11 +296,12 @@ function SpotBubble({
 
 function Avatar({ event, overlap = false }: { event: MapEvent; overlap?: boolean }) {
   const shift = overlap ? styles.overlap : null;
+  const linkOnly = event.visibility === 'link_only' ? styles.linkOnly : null;
   if (event.host.avatarUrl) {
-    return <Image accessibilityLabel={event.host.displayName} source={{ uri: event.host.avatarUrl }} style={[styles.avatar, shift]} />;
+    return <Image accessibilityLabel={event.host.displayName} source={{ uri: event.host.avatarUrl }} style={[styles.avatar, linkOnly, shift]} />;
   }
   return (
-    <View accessibilityLabel={event.host.displayName} style={[styles.avatarFallback, shift]}>
+    <View accessibilityLabel={event.host.displayName} style={[styles.avatarFallback, linkOnly, shift]}>
       <Text style={styles.fallbackText}>{event.host.displayName.slice(0, 1)}</Text>
     </View>
   );
@@ -319,7 +321,7 @@ function EventList({
   closeLabel: string;
   onClose: () => void;
   // Absent while pinning a new event; rows are then plain text.
-  onOpen?: (eventId: string) => void;
+  onOpen?: (eventId: string, token?: string) => void;
 }) {
   return (
     <Modal animationType="slide" onRequestClose={onClose} transparent visible={visible}>
@@ -336,7 +338,9 @@ function EventList({
                   <Avatar event={item} />
                   <View style={styles.rowText}>
                     <Text style={styles.rowTitle}>{item.title}</Text>
-                    <Text style={styles.rowMeta}>{item.host.displayName}</Text>
+                    <Text style={styles.rowMeta}>
+                      {item.visibility === 'link_only' ? `Link only · ${item.host.displayName}` : item.host.displayName}
+                    </Text>
                   </View>
                 </>
               );
@@ -346,9 +350,9 @@ function EventList({
               return (
                 <Pressable
                   accessibilityHint="Opens event details"
-                  accessibilityLabel={`${item.title}, hosted by ${item.host.displayName}`}
+                  accessibilityLabel={`${item.visibility === 'link_only' ? 'Link only. ' : ''}${item.title}, hosted by ${item.host.displayName}`}
                   accessibilityRole="button"
-                  onPress={() => onOpen(item.id)}
+                  onPress={() => onOpen(item.id, item.shareToken ?? undefined)}
                   style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
                 >
                   {content}
@@ -396,6 +400,9 @@ const styles = StyleSheet.create({
   },
   bubbles: {
     flexDirection: 'row',
+  },
+  linkOnly: {
+    borderColor: colors.yellow,
   },
   avatar: {
     borderColor: '#fff',

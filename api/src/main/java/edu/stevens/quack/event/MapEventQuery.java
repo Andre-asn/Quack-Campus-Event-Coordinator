@@ -27,16 +27,17 @@ class MapEventQuery {
             Instant to,
             Instant cursorStartsAt,
             UUID cursorId,
+            UUID viewerId,
             int limit) {
         String sql = """
-                select e.id, e.title, e.category, e.starts_at,
+                select e.id, e.title, e.category, e.visibility, e.share_token, e.starts_at,
                        ST_Y(e.location::geometry) as latitude,
                        ST_X(e.location::geometry) as longitude,
                        u.display_name, u.avatar_url
                 from events e
                 join users u on u.id = e.host_id
-                where e.visibility = 'public'
-                  and e.status = 'active'
+                where e.status = 'active'
+                  and (e.visibility = 'public' or (e.visibility = 'link_only' and e.host_id = ?))
                   and e.starts_at >= ?
                   and e.starts_at < ?
                   and e.location && ST_MakeEnvelope(?, ?, ?, ?, 4326)::geography
@@ -46,6 +47,7 @@ class MapEventQuery {
                         ST_MakeEnvelope(?, ?, ?, ?, 4326))
                 """;
         List<Object> args = new ArrayList<>();
+        args.add(viewerId);
         args.add(Timestamp.from(from));
         args.add(Timestamp.from(to));
         args.add(west);
@@ -74,7 +76,9 @@ class MapEventQuery {
                 rs.getDouble("latitude"),
                 rs.getDouble("longitude"),
                 rs.getTimestamp("starts_at").toInstant(),
-                new MapEventPage.MapHost(rs.getString("display_name"), rs.getString("avatar_url"))),
+                new MapEventPage.MapHost(rs.getString("display_name"), rs.getString("avatar_url")),
+                rs.getString("visibility"),
+                rs.getObject("share_token", UUID.class)),
                 args.toArray());
     }
 }

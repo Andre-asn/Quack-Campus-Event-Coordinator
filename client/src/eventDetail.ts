@@ -8,7 +8,11 @@ export type EventDetail = {
   category: string;
   locationLabel: string;
   startsAt: string;
+  endsAt: string;
   status: 'active' | 'cancelled';
+  visibility: 'public' | 'link_only';
+  shareToken?: string | null;
+  joined: boolean;
   host: {
     displayName: string;
     avatarUrl: string | null;
@@ -24,8 +28,10 @@ export async function loadEventDetail(
   sessionId: string,
   id: string,
   signal?: AbortSignal,
+  token?: string | null,
 ): Promise<DetailResult> {
-  const response = await fetch(`${apiBaseUrl}/api/v1/events/${encodeURIComponent(id)}`, {
+  const query = token ? `?token=${encodeURIComponent(token)}` : '';
+  const response = await fetch(`${apiBaseUrl}/api/v1/events/${encodeURIComponent(id)}${query}`, {
     // The session goes in our own Cookie header; see the note in auth.ts.
     credentials: 'omit',
     headers: {
@@ -44,4 +50,33 @@ export async function loadEventDetail(
     return { ok: false, message: 'This event isn’t available anymore.', retry: false };
   }
   return { ok: false, message: 'Couldn’t load this event. Try again.', retry: true };
+}
+
+export async function setAttendance(
+  sessionId: string,
+  id: string,
+  join: boolean,
+  token?: string | null,
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/events/${encodeURIComponent(id)}/attendance`, {
+    credentials: 'omit',
+    method: join ? 'PUT' : 'DELETE',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      Cookie: `${sessionCookieName}=${sessionId}`,
+    },
+    body: JSON.stringify(token ? { token } : {}),
+  });
+  if (response.ok) {
+    return { ok: true };
+  }
+  if (response.status === 401) {
+    return { ok: false, message: 'Your session has expired. Sign out and sign in again.' };
+  }
+  const problem = (await response.json().catch(() => null)) as { detail?: string } | null;
+  return {
+    ok: false,
+    message: problem?.detail ?? (join ? 'Could not join. Try again.' : 'Could not leave. Try again.'),
+  };
 }
