@@ -29,10 +29,12 @@ class MapEventQuery {
             UUID cursorId,
             int limit) {
         String sql = """
-                select e.id, e.title, e.category, e.starts_at,
+                select e.id, e.title, e.category, e.starts_at, e.location_label,
                        ST_Y(e.location::geometry) as latitude,
                        ST_X(e.location::geometry) as longitude,
-                       u.display_name, u.avatar_url
+                       u.display_name, u.avatar_url,
+                       -- Counted per row through the (event_id, user_id) primary key; no counter column.
+                       (select count(*) from event_attendance a where a.event_id = e.id) as attendee_count
                 from events e
                 join users u on u.id = e.host_id
                 where e.visibility = 'public'
@@ -74,6 +76,8 @@ class MapEventQuery {
                 rs.getDouble("latitude"),
                 rs.getDouble("longitude"),
                 rs.getTimestamp("starts_at").toInstant(),
+                rs.getString("location_label"),
+                rs.getLong("attendee_count"),
                 new MapEventPage.MapHost(rs.getString("display_name"), rs.getString("avatar_url"))),
                 args.toArray());
     }
