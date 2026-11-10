@@ -58,25 +58,34 @@ export async function setAttendance(
   join: boolean,
   token?: string | null,
 ): Promise<{ ok: true } | { ok: false; message: string }> {
-  const response = await fetch(`${apiBaseUrl}/api/v1/events/${encodeURIComponent(id)}/attendance`, {
-    credentials: 'omit',
-    method: join ? 'PUT' : 'DELETE',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      Cookie: `${sessionCookieName}=${sessionId}`,
-    },
-    body: JSON.stringify(token ? { token } : {}),
-  });
-  if (response.ok) {
-    return { ok: true };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const response = await fetch(`${apiBaseUrl}/api/v1/events/${encodeURIComponent(id)}/attendance`, {
+      credentials: 'omit',
+      method: join ? 'PUT' : 'DELETE',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        Cookie: `${sessionCookieName}=${sessionId}`,
+      },
+      body: JSON.stringify(token ? { token } : {}),
+      signal: controller.signal,
+    });
+    if (response.ok) {
+      return { ok: true };
+    }
+    if (response.status === 401) {
+      return { ok: false, message: 'Your session has expired. Sign out and sign in again.' };
+    }
+    const problem = (await response.json().catch(() => null)) as { detail?: string } | null;
+    return {
+      ok: false,
+      message: problem?.detail ?? (join ? 'Could not join. Try again.' : 'Could not leave. Try again.'),
+    };
+  } catch {
+    return { ok: false, message: 'Couldn’t reach Quack!. Check your connection.' };
+  } finally {
+    clearTimeout(timer);
   }
-  if (response.status === 401) {
-    return { ok: false, message: 'Your session has expired. Sign out and sign in again.' };
-  }
-  const problem = (await response.json().catch(() => null)) as { detail?: string } | null;
-  return {
-    ok: false,
-    message: problem?.detail ?? (join ? 'Could not join. Try again.' : 'Could not leave. Try again.'),
-  };
 }

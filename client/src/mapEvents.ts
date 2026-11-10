@@ -27,7 +27,8 @@ export type Spot = {
   events: MapEvent[];
 };
 
-let cached: { url: string; etag: string; events: MapEvent[] } | null = null;
+let cached: { sessionId: string; url: string; etag: string; events: MapEvent[] } | null = null;
+let loadGeneration = 0;
 
 // The first page is included. Four more pages is 500 events, then the map stops.
 const maxExtraPages = 4;
@@ -52,19 +53,21 @@ export async function loadMapEvents(
   bbox: string,
   signal?: AbortSignal,
 ): Promise<{ events: MapEvent[]; unchanged: boolean }> {
+  const generation = ++loadGeneration;
   const { from, to } = campusDayRange(new Date());
   const url = `${apiBaseUrl}/api/v1/events?bbox=${encodeURIComponent(bbox)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=100`;
   const headers: Record<string, string> = {
     Accept: 'application/json',
     Cookie: `${sessionCookieName}=${sessionId}`,
   };
-  if (cached?.url === url) {
-    headers['If-None-Match'] = cached.etag;
+  const entry = cached?.sessionId === sessionId && cached.url === url ? cached : null;
+  if (entry) {
+    headers['If-None-Match'] = entry.etag;
   }
   // The session goes in our own Cookie header; see the note in auth.ts.
   const response = await fetch(url, { credentials: 'omit', headers, signal });
-  if (response.status === 304 && cached?.url === url) {
-    return { events: cached.events, unchanged: false };
+  if (response.status === 304 && entry) {
+    return { events: entry.events, unchanged: false };
   }
   if (!response.ok) {
     throw new Error(`Map query failed (${response.status})`);
@@ -88,6 +91,8 @@ export async function loadMapEvents(
     events.push(...(nextPage.events ?? []));
     cursor = nextPage.nextCursor;
   }
-  cached = nextEtag && !page.nextCursor ? { url, etag: nextEtag, events } : null;
+  if (generation === loadGeneration) {
+    cached = nextEtag && !page.nextCursor ? { sessionId, url, etag: nextEtag, events } : null;
+  }
   return { events, unchanged: false };
 }

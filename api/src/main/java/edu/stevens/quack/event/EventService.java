@@ -122,7 +122,7 @@ public class EventService {
                 request.longitude(),
                 strip(request.locationLabel()),
                 micros(request.startsAt()));
-        validateEdit(clean, event.getStartsAt());
+        validateEdit(clean, event.getStartsAt(), event.getEndsAt());
         event.change(
                 clean.title(),
                 clean.description(),
@@ -171,11 +171,16 @@ public class EventService {
         return visibility;
     }
 
-    // A started event keeps its past start time. Moving the start still has to land inside the window.
-    private void validateEdit(EventController.EditEventRequest request, Instant storedStart) {
+    // A started event keeps its past start time. Moving the start still has to land inside the window
+    // and before the end time the event already has.
+    private void validateEdit(EventController.EditEventRequest request, Instant storedStart, Instant storedEnd) {
         List<InvalidEventException.InvalidField> errors = new ArrayList<>();
         fields(errors, request.title(), request.description(), request.category(), request.latitude(),
                 request.longitude(), request.locationLabel(), request.startsAt(), storedStart);
+        if (storedEnd != null && request.startsAt() != null
+                && !request.startsAt().isBefore(storedEnd.truncatedTo(ChronoUnit.MICROS))) {
+            errors.add(invalid("startsAt", "NOT_BEFORE_END", "Start time must be before the end time."));
+        }
         if (!errors.isEmpty()) {
             throw new InvalidEventException(errors);
         }

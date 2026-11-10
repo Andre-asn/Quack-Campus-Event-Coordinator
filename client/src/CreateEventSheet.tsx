@@ -509,7 +509,7 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
                   <ClockIcon height={20} width={20} />
                   <DateTimePicker
                     accessibilityLabel={`Ends: ${until}`}
-                    disabled={busy}
+                    disabled={locked}
                     display="compact"
                     minimumDate={new Date(startsAt.getTime() + 60_000)}
                     mode="datetime"
@@ -525,8 +525,8 @@ export default function CreateEventSheet({ sessionId, place, onInset, onClose, o
                   accessibilityHint="Opens an end date and time picker"
                   accessibilityLabel={`Ends: ${until}`}
                   accessibilityRole="button"
-                  accessibilityState={{ disabled: busy }}
-                  disabled={busy}
+                  accessibilityState={{ disabled: locked }}
+                  disabled={locked}
                   onPress={() => pickEndOnAndroid(endsAt, startsAt, (date) => {
                     setEndsAt(date);
                     clearErrors('endsAt');

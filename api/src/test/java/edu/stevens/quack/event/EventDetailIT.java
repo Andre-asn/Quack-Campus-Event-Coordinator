@@ -259,7 +259,8 @@ class EventDetailIT extends PostgresIntegrationTest {
                 .returnResult()
                 .getResponseBody();
 
-        assertThat(body).contains("Quack! isn't installed on this device.");
+        assertThat(body).contains("Open Quack");
+        assertThat(body).contains("isn't installed on this device.");
         assertThat(body).doesNotContain(token);
     }
 

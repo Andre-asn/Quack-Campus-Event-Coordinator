@@ -30,7 +30,8 @@ class MapEventQuery {
             UUID viewerId,
             int limit) {
         String sql = """
-                select e.id, e.title, e.category, e.visibility, e.share_token, e.starts_at,
+                select e.id, e.title, e.category, e.visibility,
+                       case when e.host_id = ? then e.share_token end as share_token, e.starts_at,
                        ST_Y(e.location::geometry) as latitude,
                        ST_X(e.location::geometry) as longitude,
                        u.display_name, u.avatar_url
@@ -47,6 +48,7 @@ class MapEventQuery {
                         ST_MakeEnvelope(?, ?, ?, ?, 4326))
                 """;
         List<Object> args = new ArrayList<>();
+        args.add(viewerId);
         args.add(viewerId);
         args.add(Timestamp.from(from));
         args.add(Timestamp.from(to));

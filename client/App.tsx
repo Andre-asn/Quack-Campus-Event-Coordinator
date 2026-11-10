@@ -115,7 +115,7 @@ function QuackApp() {
       setPendingLink(event);
       setOpenEventId(event.id);
       setOpenToken(event.token);
-      setCreating(false);
+      closeCreate();
     }
     Linking.getInitialURL().then(take).catch(() => undefined);
     const subscription = Linking.addEventListener('url', ({ url }) => take(url));
@@ -126,7 +126,8 @@ function QuackApp() {
     if (screen.status === 'signed-in' && pendingLink) {
       setOpenEventId(pendingLink.id);
       setOpenToken(pendingLink.token);
-      setCreating(false);
+      closeCreate();
+      setPendingLink(null);
     }
   }, [screen.status, pendingLink]);
 

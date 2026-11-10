@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   BackHandler,
@@ -53,6 +53,7 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose }:
   const [attempt, setAttempt] = useState(0);
   const [now, setNow] = useState(() => new Date());
   const [pending, setPending] = useState(false);
+  const attendanceRequest = useRef(0);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const offset = useSharedValue(reduced ? 0 : windowHeight);
@@ -99,24 +100,45 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose }:
     if (pending) {
       return;
     }
+    const requestId = attendanceRequest.current + 1;
+    attendanceRequest.current = requestId;
     const joining = !event.joined;
+    const previous = event;
     setPending(true);
     setActionError(null);
-    const outcome = await setAttendance(sessionId, eventId, joining, token ?? event.shareToken);
-    if (!outcome.ok) {
-      setPending(false);
-      setActionError(outcome.message);
-      return;
-    }
-    setPending(false);
     setState({
       status: 'loaded',
       event: {
         ...event,
         joined: joining,
-        attendeeCount: event.attendeeCount + (joining ? 1 : -1),
+        attendeeCount: Math.max(0, event.attendeeCount + (joining ? 1 : -1)),
       },
     });
+    let outcome: { ok: true } | { ok: false; message: string };
+    try {
+      outcome = await setAttendance(sessionId, eventId, joining, token ?? event.shareToken);
+    } catch {
+      outcome = { ok: false, message: 'Couldn’t reach Quack!. Check your connection.' };
+    }
+    if (requestId !== attendanceRequest.current) {
+      return;
+    }
+    setPending(false);
+    const refreshed = await loadEventDetail(sessionId, eventId, undefined, token).catch(() => null);
+    if (requestId !== attendanceRequest.current) {
+      return;
+    }
+    if (refreshed && refreshed.ok) {
+      setState({ status: 'loaded', event: refreshed.event });
+      if (!outcome.ok && refreshed.event.joined !== joining) {
+        setActionError(outcome.message);
+      }
+      return;
+    }
+    if (!outcome.ok) {
+      setState({ status: 'loaded', event: previous });
+      setActionError(outcome.message);
+    }
   }
 
   // Keeps "Starts in 25 min" honest while the sheet stays open.

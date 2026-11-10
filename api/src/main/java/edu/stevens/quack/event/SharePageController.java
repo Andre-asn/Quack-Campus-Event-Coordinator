@@ -25,17 +25,16 @@ class SharePageController {
                   <title>Quack!</title>
                 </head>
                 <body>
-                  <p>Quack! isn't installed on this device.</p>
+                  <p>Open Quack to see this event. If Quack does not open, it isn't installed on this device.</p>
+                  <p><a id="open">Open Quack</a></p>
                   <script>
                     var id = %s;
-                    var stay = new URLSearchParams(location.search).get('stay');
                     var token = new URLSearchParams(location.hash.replace(/^#/, '')).get('token');
-                    if (!stay && id && token) {
-                      var back = location.origin + location.pathname + '?stay=1' + location.hash;
-                      location.replace('intent://events/' + encodeURIComponent(id)
-                        + '?token=' + encodeURIComponent(token)
-                        + '#Intent;scheme=quack;package=com.quackcampus.app;S.browser_fallback_url='
-                        + encodeURIComponent(back) + ';end');
+                    var open = document.getElementById('open');
+                    if (!id || !token) {
+                      open.remove();
+                    } else {
+                      open.href = 'quack://events/' + encodeURIComponent(id) + '?token=' + encodeURIComponent(token);
                     }
                   </script>
                 </body>

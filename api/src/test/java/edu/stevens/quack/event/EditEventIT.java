@@ -152,6 +152,24 @@ class EditEventIT extends PostgresIntegrationTest {
     }
 
     @Test
+    void movingTheStartToTheStoredEndIsRejected() {
+        User host = signIn("ada");
+        UUID id = create(host, "public");
+        Instant endsAt = jdbc.queryForObject(
+                "select ends_at from events where id = ?", Timestamp.class, id).toInstant();
+
+        patch(host, id, edit(Map.of("startsAt", endsAt.toString())))
+                .expectStatus().isEqualTo(422)
+                .expectBody()
+                .jsonPath("$.code").isEqualTo("INVALID_EVENT")
+                .jsonPath("$.errors[0].field").isEqualTo("startsAt")
+                .jsonPath("$.errors[0].code").isEqualTo("NOT_BEFORE_END");
+
+        assertThat(jdbc.queryForObject("select starts_at from events where id = ?", Timestamp.class, id).toInstant())
+                .isNotEqualTo(endsAt);
+    }
+
+    @Test
     void movingTheStartIntoThePastIsRejected() {
         User host = signIn("ada");
         UUID id = create(host, "public");
