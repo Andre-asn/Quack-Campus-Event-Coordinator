@@ -145,9 +145,12 @@ class AttendanceListIT extends PostgresIntegrationTest {
         for (int i = 0; i < 21; i++) {
             attendees.add(user(i == 0 || i == 1 ? "same-name" : "attendee-" + i));
         }
-        for (User attendee : attendees) {
+        Instant firstPageJoinedAt = TEST_NOW.minusSeconds(1);
+        for (int i = 0; i < attendees.size(); i++) {
+            User attendee = attendees.get(i);
+            Instant joinedAt = i < 20 ? firstPageJoinedAt : TEST_NOW;
             jdbc.update("insert into event_attendance (event_id, user_id, joined_at) values (?, ?, ?)",
-                    eventId, attendee.getId(), java.sql.Timestamp.from(TEST_NOW));
+                    eventId, attendee.getId(), java.sql.Timestamp.from(joinedAt));
         }
 
         List<String> expectedNames = jdbc.queryForList("""
