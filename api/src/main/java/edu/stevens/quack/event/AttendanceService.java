@@ -1,6 +1,8 @@
 package edu.stevens.quack.event;
 
 import java.time.Clock;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
@@ -91,6 +93,41 @@ public class AttendanceService {
         }
 
         attendance.leave(eventId, user.getId());
+    }
+
+    /**
+     * Returns attendee names only to the host or a current attendee. Link-only visibility
+     * is checked before membership, so inaccessible events never reveal attendance data.
+     */
+    @Transactional(readOnly = true)
+    public AttendanceController.AttendanceResponse list(UUID eventId, String token) {
+        User viewer = currentUser.require();
+        Event event = events.findById(eventId).orElseThrow(AttendanceService::notFound);
+
+        if ("link_only".equals(event.getVisibility())
+                && !matchesToken(event.getShareToken(), token)) {
+            throw notFound();
+        }
+
+        List<AttendanceRepository.AttendanceSnapshotRow> rows = attendance.snapshot(eventId, viewer.getId());
+        AttendanceRepository.AttendanceSnapshotRow first = rows.get(0);
+        if (!event.getHostId().equals(viewer.getId()) && !first.viewerJoined()) {
+            throw new AttendanceException(
+                    HttpStatus.FORBIDDEN,
+                    "ATTENDEE_LIST_FORBIDDEN",
+                    "Only the event host and attendees can see attendee names.");
+        }
+
+        List<String> names = new ArrayList<>();
+        for (AttendanceRepository.AttendanceSnapshotRow row : rows) {
+            if (row.displayName() != null) {
+                names.add(row.displayName());
+            }
+        }
+        return new AttendanceController.AttendanceResponse(
+                first.attendeeCount(),
+                List.copyOf(names),
+                first.attendeeCount() - names.size());
     }
 
     private static boolean matchesToken(UUID expected, String supplied) {
