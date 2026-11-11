@@ -37,6 +37,12 @@ public class EventController {
         return ResponseEntity.created(location).body(EventResponse.from(event));
     }
 
+    @PostMapping("/{id}/cancel")
+    public ResponseEntity<Void> cancel(@PathVariable String id) {
+        events.cancel(id);
+        return ResponseEntity.ok().build();
+    }
+
     @GetMapping
     public ResponseEntity<MapEventPage> map(
             @RequestParam(required = false) String bbox,
