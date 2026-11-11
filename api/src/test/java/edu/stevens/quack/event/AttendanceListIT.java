@@ -281,7 +281,7 @@ class AttendanceListIT extends PostgresIntegrationTest {
     private Event save(User host) {
         return events.saveAndFlush(Event.create(
                 UUID.randomUUID(), host.getId(), "Study group", "Study together", "study",
-                40.7440, -74.0255, "Library", STARTS_AT, ENDS_AT, TEST_NOW));
+                40.7440, -74.0255, "Library", STARTS_AT, ENDS_AT, "public", null, TEST_NOW));
     }
 
     private String sessionFor(User user) {
