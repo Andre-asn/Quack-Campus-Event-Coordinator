@@ -16,6 +16,8 @@ public record MapEventPage(List<MapPin> events, String nextCursor) {
             double latitude,
             double longitude,
             Instant startsAt,
+            String locationLabel,
+            long attendeeCount,
             MapHost host) {
     }
 

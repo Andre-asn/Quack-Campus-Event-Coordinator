@@ -8,6 +8,8 @@ export type MapEvent = {
   latitude: number;
   longitude: number;
   startsAt: string;
+  locationLabel: string;
+  attendeeCount: number;
   host: {
     displayName: string;
     avatarUrl: string | null;
