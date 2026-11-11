@@ -163,6 +163,13 @@ function QuackApp() {
           onPinMoved={creating ? setPinned : undefined}
           refreshKey={mapRefresh}
           sessionId={screen.session.sessionId}
+          // The top bar hides while a sheet covers the map.
+          account={creating || openEventId !== null ? undefined : {
+            user: screen.session.user,
+            busy: screen.busy,
+            message: screen.message,
+            onSignOut: () => void onSignOut(),
+          }}
         />
       </View>
       {openEventId ? (
@@ -199,20 +206,6 @@ function QuackApp() {
           <Text style={styles.fabText}>Pin an event</Text>
         </Pressable>
       )}
-      {/* Clears the status bar, notch, or Dynamic Island while the map stays full-screen. */}
-      <View pointerEvents="box-none" style={[styles.overlay, (creating || openEventId !== null) && styles.hidden,{ paddingTop: insets.top + 12 }]}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`Sign out ${screen.session.user.email}`}
-          accessibilityState={{ disabled: screen.busy }}
-          disabled={screen.busy}
-          onPress={() => void onSignOut()}
-          style={({ pressed }) => [styles.chip, pressed && styles.pressed]}
-        >
-          <Text style={styles.chipText}>{screen.busy ? 'Signing out...' : 'Sign out'}</Text>
-        </Pressable>
-        {screen.message ? <Text style={styles.chipError}>{screen.message}</Text> : null}
-      </View>
     </View>
   );
 }
@@ -221,25 +214,9 @@ const styles = StyleSheet.create({
   home: {
     flex: 1,
   },
-  overlay: {
-    alignItems: 'flex-end',
-    gap: 6,
-    paddingHorizontal: 16,
-  },
-  chip: {
-    backgroundColor: '#fff',
-    borderRadius: 999,
-    elevation: 3,
-    minHeight: 44,
-    justifyContent: 'center',
-    paddingHorizontal: 16,
-  },
   pressed: {
     opacity: 0.85,
     transform: [{ scale: 0.97 }],
-  },
-  hidden: {
-    display: 'none',
   },
   fab: {
     alignItems: 'center',
@@ -262,17 +239,5 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontSize: 16,
     fontWeight: '600',
-  },
-  chipText: {
-    color: '#111',
-    fontWeight: '600',
-  },
-  chipError: {
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    color: '#8a1f1f',
-    elevation: 3,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
   },
 });
