@@ -248,7 +248,7 @@ class CancellationIT extends PostgresIntegrationTest {
 
     private Event save(User host, String title, Instant startsAt) {
         return events.saveAndFlush(Event.create(UUID.randomUUID(), host.getId(), title, "Study together", "study",
-                40.7440, -74.0255, "Library", startsAt, ENDS_AT, TEST_NOW));
+                40.7440, -74.0255, "Library", startsAt, ENDS_AT, "public", null, TEST_NOW));
     }
 
     private Map<String, Object> eventRow(UUID eventId) {

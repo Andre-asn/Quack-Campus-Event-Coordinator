@@ -56,7 +56,7 @@ type Props = {
   bottomInset?: number;
   onPinMoved?: (place: PinnedPlace) => void;
   // Tapping a host bubble, or a row in a list, opens that event's detail sheet.
-  onOpenEvent?: (eventId: string) => void;
+  onOpenEvent?: (eventId: string, token?: string) => void;
   // The signed-in user, for the top bar. Absent hides the bar (while a sheet covers the map).
   account?: Account;
 };
@@ -270,9 +270,9 @@ export default function CampusMap({
         closeLabel="Close show all"
         events={showAll?.events ?? []}
         onClose={() => setShowAll(null)}
-        onOpen={onOpenEvent && ((id) => {
+        onOpen={onOpenEvent && ((id, token) => {
           setShowAll(null);
-          onOpenEvent(id);
+          onOpenEvent(id, token);
         })}
         title="Show all"
         visible={showAll !== null}
@@ -283,9 +283,9 @@ export default function CampusMap({
         filter={listFilter}
         onClose={() => setViewList(false)}
         onFilterChange={setListFilter}
-        onOpen={onOpenEvent && ((id) => {
+        onOpen={onOpenEvent && ((id, token) => {
           setViewList(false);
-          onOpenEvent(id);
+          onOpenEvent(id, token);
         })}
         title="Events in this view"
         visible={viewList}
@@ -305,7 +305,8 @@ function hasStarted(event: MapEvent, now: Date): boolean {
 
 function pinLabel(event: MapEvent, now: Date): string {
   const when = hasStarted(event, now) ? `started at ${startTime(event)}` : `starts at ${startTime(event)}`;
-  return `${event.title}, hosted by ${event.host.displayName}, ${when}`;
+  const linkOnly = event.visibility === 'link_only' ? 'Link only. ' : '';
+  return `${linkOnly}${event.title}, hosted by ${event.host.displayName}, ${when}`;
 }
 
 // Figma 03. One event: a time tag (host + start time, yellow "Now" once started). Several: up to
@@ -319,24 +320,31 @@ function SpotBubble({
   spot: Spot;
   now: Date;
   // Absent while pinning a new event; a tap then opens Show all, as before the detail sheet.
-  onOpen?: (eventId: string) => void;
+  onOpen?: (eventId: string, token?: string) => void;
   onShowAll: () => void;
 }) {
   const hint = onOpen ? 'Opens event details' : 'Shows the events here';
+  const open = (event: MapEvent) => (onOpen ? onOpen(event.id, event.shareToken ?? undefined) : onShowAll());
 
   if (spot.events.length === 1) {
     const event = spot.events[0];
     const started = hasStarted(event, now);
+    const linkOnly = event.visibility === 'link_only';
     return (
       <View style={styles.pin}>
         <Pressable
           accessibilityHint={hint}
           accessibilityLabel={pinLabel(event, now)}
           accessibilityRole="button"
-          onPress={onOpen ? () => onOpen(event.id) : onShowAll}
-          style={({ pressed }) => [styles.tag, started && styles.tagNow, pressed && styles.pinPressed]}
+          onPress={() => open(event)}
+          style={({ pressed }) => [
+            styles.tag,
+            started && styles.tagNow,
+            linkOnly && styles.tagLinkOnly,
+            pressed && styles.pinPressed,
+          ]}
         >
-          <HostAvatar host={event.host} size={24} />
+          <HostAvatar host={event.host} size={24} style={linkOnly ? styles.linkOnlyRing : undefined} />
           <Text style={styles.tagText}>{started ? 'Now' : startTime(event)}</Text>
         </Pressable>
         {started ? <PointerYellow height={7} width={12} /> : <PointerWhite height={7} width={12} />}
@@ -354,10 +362,15 @@ function SpotBubble({
             accessibilityLabel={pinLabel(event, now)}
             accessibilityRole="button"
             key={event.id}
-            onPress={onOpen ? () => onOpen(event.id) : onShowAll}
+            onPress={() => open(event)}
             style={({ pressed }) => [styles.clusterAvatar, pressed && styles.pinPressed]}
           >
-            <HostAvatar host={event.host} ringed size={28} />
+            <HostAvatar
+              host={event.host}
+              ringed
+              size={28}
+              style={event.visibility === 'link_only' ? styles.linkOnlyRing : undefined}
+            />
           </Pressable>
         ))}
         <Pressable
@@ -391,7 +404,7 @@ function EventList({
   closeLabel: string;
   onClose: () => void;
   // Absent while pinning a new event; rows are then plain text.
-  onOpen?: (eventId: string) => void;
+  onOpen?: (eventId: string, token?: string) => void;
   // Only the "Events in this view" list has filters.
   filter?: EventFilter;
   onFilterChange?: (filter: EventFilter) => void;
@@ -497,7 +510,9 @@ function EventList({
                   <HostAvatar host={item.host} size={32} />
                   <View style={styles.rowText}>
                     <Text style={styles.rowTitle}>{item.title}</Text>
-                    <Text style={styles.rowMeta}>{item.host.displayName}</Text>
+                    <Text style={styles.rowMeta}>
+                      {item.visibility === 'link_only' ? `Link only · ${item.host.displayName}` : item.host.displayName}
+                    </Text>
                   </View>
                 </>
               );
@@ -507,9 +522,9 @@ function EventList({
               return (
                 <Pressable
                   accessibilityHint="Opens event details"
-                  accessibilityLabel={`${item.title}, hosted by ${item.host.displayName}`}
+                  accessibilityLabel={`${item.visibility === 'link_only' ? 'Link only. ' : ''}${item.title}, hosted by ${item.host.displayName}`}
                   accessibilityRole="button"
-                  onPress={() => onOpen(item.id)}
+                  onPress={() => onOpen(item.id, item.shareToken ?? undefined)}
                   style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
                 >
                   {content}
@@ -577,6 +592,13 @@ const styles = StyleSheet.create({
   },
   tagNow: {
     backgroundColor: colors.yellow,
+  },
+  tagLinkOnly: {
+    borderColor: colors.yellow,
+    borderWidth: 2,
+  },
+  linkOnlyRing: {
+    borderColor: colors.yellow,
   },
   tagText: {
     color: colors.ink,
