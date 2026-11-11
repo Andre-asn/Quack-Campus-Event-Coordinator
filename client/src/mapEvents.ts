@@ -8,6 +8,8 @@ export type MapEvent = {
   latitude: number;
   longitude: number;
   startsAt: string;
+  locationLabel: string;
+  attendeeCount: number;
   visibility: 'public' | 'link_only';
   shareToken?: string | null;
   host: {

@@ -419,6 +419,9 @@ public class EventService {
                 field(digest, pin.visibility());
                 field(digest, String.valueOf(pin.shareToken()));
                 field(digest, pin.startsAt().toString());
+                field(digest, pin.locationLabel());
+                // A join or leave changes the count, so it must change the ETag.
+                field(digest, Long.toString(pin.attendeeCount()));
                 field(digest, pin.host().displayName());
                 field(digest, String.valueOf(pin.host().avatarUrl()));
                 field(digest, Double.toString(pin.latitude()));
