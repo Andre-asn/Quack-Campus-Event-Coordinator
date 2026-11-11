@@ -4,10 +4,13 @@ import java.net.URI;
 import java.time.Instant;
 import java.util.UUID;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -35,6 +38,11 @@ public class EventController {
                 .buildAndExpand(event.getId())
                 .toUri();
         return ResponseEntity.created(location).body(EventResponse.from(event));
+    }
+
+    @PatchMapping("/{id}")
+    public EventResponse update(@PathVariable UUID id, @RequestBody EditEventRequest request) {
+        return EventResponse.from(events.update(id, request));
     }
 
     @PostMapping("/{id}/cancel")
@@ -97,9 +105,22 @@ public class EventController {
             Double longitude,
             String locationLabel,
             Instant startsAt,
-            Instant endsAt) {
+            Instant endsAt,
+            String visibility) {
     }
 
+    public record EditEventRequest(
+            String title,
+            String description,
+            String category,
+            Double latitude,
+            Double longitude,
+            String locationLabel,
+            Instant startsAt) {
+    }
+
+    // shareToken is omitted for a public event. It is returned once, to the host who just created a link-only event.
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record EventResponse(
             UUID id,
             UUID hostId,
@@ -111,6 +132,7 @@ public class EventController {
             String locationLabel,
             Instant startsAt,
             String visibility,
+            UUID shareToken,
             String status,
             Instant createdAt,
             Instant endsAt) {
@@ -127,6 +149,7 @@ public class EventController {
                     event.getLocationLabel(),
                     event.getStartsAt(),
                     event.getVisibility(),
+                    event.getShareToken(),
                     event.getStatus(),
                     event.getCreatedAt(),
                     event.getEndsAt());

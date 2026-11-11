@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   BackHandler,
-  Image,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   View,
@@ -25,13 +25,18 @@ import ClockIcon from '../assets/detail/clock.svg';
 import PeopleIcon from '../assets/detail/people.svg';
 import PlaceIcon from '../assets/detail/place.svg';
 import CloseIcon from '../assets/create/close.svg';
-import { loadEventDetail, type EventDetail } from './eventDetail';
-import { colors, easeOut, fonts } from './theme';
+import { categoryLabel } from './categories';
+import { loadEventDetail, setAttendance, type EventDetail } from './eventDetail';
+import { eventShareLink } from './events';
+import HostAvatar from './HostAvatar';
+// Reanimated's withTiming needs the worklet easing, not core Animated's easeOut.
+import { colors, fonts, sheetEaseOut as easeOut } from './theme';
 import { formatWhen, relativeStart } from './when';
 
 type Props = {
   sessionId: string;
   eventId: string;
+  token?: string | null;
   onClose: () => void;
 };
 
@@ -42,13 +47,18 @@ type State =
 
 // Frame 06 "Event detail: not joined" in the Quack! Figma redesign. The map stays mounted under the
 // sheet and its camera is never touched, so dismissing returns to the same view.
-export default function EventDetailSheet({ sessionId, eventId, onClose }: Props) {
+export default function EventDetailSheet({ sessionId, eventId, token, onClose }: Props) {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const reduced = useReducedMotion();
   const [state, setState] = useState<State>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0);
   const [now, setNow] = useState(() => new Date());
+  const [pending, setPending] = useState(false);
+  const [pendingAction, setPendingAction] = useState<'join' | 'leave' | null>(null);
+  const [needsRefresh, setNeedsRefresh] = useState(false);
+  const attendanceRequest = useRef(0);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const offset = useSharedValue(reduced ? 0 : windowHeight);
   const opacity = useSharedValue(reduced ? 0 : 1);
@@ -67,8 +77,13 @@ export default function EventDetailSheet({ sessionId, eventId, onClose }: Props)
   useEffect(() => {
     const controller = new AbortController();
     let cancelled = false;
+    attendanceRequest.current += 1;
     setState({ status: 'loading' });
-    loadEventDetail(sessionId, eventId, controller.signal)
+    setPending(false);
+    setPendingAction(null);
+    setNeedsRefresh(false);
+    setActionError(null);
+    loadEventDetail(sessionId, eventId, controller.signal, token)
       .then((result) => {
         if (cancelled) {
           return;
@@ -86,7 +101,69 @@ export default function EventDetailSheet({ sessionId, eventId, onClose }: Props)
       cancelled = true;
       controller.abort();
     };
-  }, [sessionId, eventId, attempt]);
+  }, [sessionId, eventId, token, attempt]);
+
+  async function changeAttendance(event: EventDetail) {
+    if (pending) {
+      return;
+    }
+    const requestId = attendanceRequest.current + 1;
+    attendanceRequest.current = requestId;
+    const joining = !event.joined;
+    const previous = event;
+    setPending(true);
+    setPendingAction(joining ? 'join' : 'leave');
+    setNeedsRefresh(false);
+    setActionError(null);
+    setState({
+      status: 'loaded',
+      event: {
+        ...event,
+        joined: joining,
+        attendeeCount: Math.max(0, event.attendeeCount + (joining ? 1 : -1)),
+      },
+    });
+    let outcome: { ok: true } | { ok: false; message: string };
+    try {
+      outcome = await setAttendance(sessionId, eventId, joining, token ?? event.shareToken);
+    } catch {
+      outcome = { ok: false, message: 'Couldn’t reach Quack!. Check your connection.' };
+    }
+    if (requestId !== attendanceRequest.current) {
+      return;
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15_000);
+    let refreshed: Awaited<ReturnType<typeof loadEventDetail>> | null = null;
+    try {
+      refreshed = await loadEventDetail(sessionId, eventId, controller.signal, token);
+    } catch {
+      refreshed = null;
+    } finally {
+      clearTimeout(timer);
+    }
+    if (requestId !== attendanceRequest.current) {
+      return;
+    }
+    setPending(false);
+    setPendingAction(null);
+    if (refreshed?.ok) {
+      setNeedsRefresh(false);
+      setState({ status: 'loaded', event: refreshed.event });
+      if (!outcome.ok && refreshed.event.joined !== joining) {
+        setActionError(outcome.message);
+      }
+      return;
+    }
+    if (outcome.ok) {
+      setNeedsRefresh(true);
+      setActionError('Couldn’t refresh this event. Try again.');
+      return;
+    }
+    setNeedsRefresh(false);
+    setState({ status: 'loaded', event: previous });
+    setActionError(outcome.message);
+  }
 
   // Keeps "Starts in 25 min" honest while the sheet stays open.
   useEffect(() => {
@@ -164,7 +241,15 @@ export default function EventDetailSheet({ sessionId, eventId, onClose }: Props)
       </GestureDetector>
 
       {state.status === 'loaded' ? (
-        <Details event={state.event} now={now} />
+        <Details
+          actionError={actionError}
+          event={state.event}
+          now={now}
+          onAttendance={() => void changeAttendance(state.event)}
+          onRetry={needsRefresh ? () => setAttempt((value) => value + 1) : undefined}
+          pending={pending}
+          pendingAction={pendingAction}
+        />
       ) : state.status === 'loading' ? (
         <View accessibilityLabel="Loading event" style={styles.placeholder}>
           <ActivityIndicator color={colors.red} />
@@ -200,7 +285,33 @@ export default function EventDetailSheet({ sessionId, eventId, onClose }: Props)
   );
 }
 
-function Details({ event, now }: { event: EventDetail; now: Date }) {
+function attendanceLabel(joined: boolean, pendingAction: 'join' | 'leave' | null): string {
+  if (pendingAction === 'join') {
+    return 'Joining...';
+  }
+  if (pendingAction === 'leave') {
+    return 'Leaving...';
+  }
+  return joined ? 'Leave' : 'Join';
+}
+
+function Details({
+  event,
+  now,
+  pending,
+  pendingAction,
+  actionError,
+  onAttendance,
+  onRetry,
+}: {
+  event: EventDetail;
+  now: Date;
+  pending: boolean;
+  pendingAction: 'join' | 'leave' | null;
+  actionError: string | null;
+  onAttendance: () => void;
+  onRetry?: () => void;
+}) {
   const startsAt = new Date(event.startsAt);
   const cancelled = event.status === 'cancelled';
   const relative = relativeStart(startsAt, now);
@@ -209,7 +320,7 @@ function Details({ event, now }: { event: EventDetail; now: Date }) {
     : relative.startsWith('in ')
       ? `Starts ${relative}`
       : `Started ${relative}`;
-  const category = event.category[0].toUpperCase() + event.category.slice(1);
+  const category = categoryLabel(event.category);
 
   return (
     <ScrollView bounces={false} contentContainerStyle={styles.content}>
@@ -231,7 +342,8 @@ function Details({ event, now }: { event: EventDetail; now: Date }) {
         </Text>
         <Text style={styles.description}>{event.description}</Text>
         <View style={styles.host}>
-          <HostAvatar host={event.host} />
+          {/* Same colour as this host's pin on the map. */}
+          <HostAvatar host={event.host} size={28} />
           <Text style={styles.hostText}>Hosted by {event.host.displayName}</Text>
         </View>
       </View>
@@ -262,24 +374,45 @@ function Details({ event, now }: { event: EventDetail; now: Date }) {
         <PeopleIcon height={22} width={22} />
         <Text style={styles.count}>{event.attendeeCount} going</Text>
       </View>
-    </ScrollView>
-  );
-}
 
-function HostAvatar({ host }: { host: EventDetail['host'] }) {
-  if (host.avatarUrl) {
-    return <Image accessibilityIgnoresInvertColors source={{ uri: host.avatarUrl }} style={styles.avatar} />;
-  }
-  const initials = host.displayName
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((word) => word[0].toUpperCase())
-    .join('');
-  return (
-    <View style={[styles.avatar, styles.avatarFallback]}>
-      <Text style={styles.avatarText}>{initials}</Text>
-    </View>
+      {event.status === 'active' || event.joined ? (
+        <Pressable
+          accessibilityLabel={attendanceLabel(event.joined, pendingAction)}
+          accessibilityRole="button"
+          accessibilityState={{ busy: pending, disabled: pending }}
+          disabled={pending}
+          onPress={onAttendance}
+          style={({ pressed }) => [styles.join, pressed && styles.pressed]}
+        >
+          <Text style={styles.joinText}>{attendanceLabel(event.joined, pendingAction)}</Text>
+        </Pressable>
+      ) : null}
+      {actionError ? (
+        <Text accessibilityLiveRegion="polite" accessibilityRole="alert" style={styles.actionError}>
+          {actionError}
+        </Text>
+      ) : null}
+      {onRetry ? (
+        <Pressable
+          accessibilityLabel="Try loading the event again"
+          accessibilityRole="button"
+          onPress={onRetry}
+          style={({ pressed }) => [styles.retry, pressed && styles.pressed]}
+        >
+          <Text style={styles.retryText}>Try again</Text>
+        </Pressable>
+      ) : null}
+      {event.shareToken ? (
+        <Pressable
+          accessibilityLabel="Share link"
+          accessibilityRole="button"
+          onPress={() => void Share.share({ message: eventShareLink(event.id, event.shareToken ?? '') })}
+          style={({ pressed }) => [styles.share, pressed && styles.pressed]}
+        >
+          <Text style={styles.shareText}>Share link</Text>
+        </Pressable>
+      ) : null}
+    </ScrollView>
   );
 }
 
@@ -414,21 +547,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 10,
   },
-  avatar: {
-    borderRadius: 14,
-    height: 28,
-    width: 28,
-  },
-  avatarFallback: {
-    alignItems: 'center',
-    backgroundColor: colors.avatar,
-    justifyContent: 'center',
-  },
-  avatarText: {
-    color: colors.white,
-    fontSize: 11,
-    fontWeight: '700',
-  },
   hostText: {
     color: colors.muted,
     flexShrink: 1,
@@ -473,6 +591,38 @@ const styles = StyleSheet.create({
     color: colors.ink,
     fontFamily: fonts.displayBold,
     fontSize: 18,
+  },
+  join: {
+    alignItems: 'center',
+    backgroundColor: colors.red,
+    borderRadius: 28,
+    justifyContent: 'center',
+    marginTop: 20,
+    minHeight: 52,
+  },
+  joinText: {
+    color: colors.white,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  actionError: {
+    color: colors.red,
+    fontSize: 14,
+    marginTop: 8,
+  },
+  share: {
+    alignItems: 'center',
+    borderColor: colors.red,
+    borderRadius: 28,
+    borderWidth: 1,
+    justifyContent: 'center',
+    marginTop: 12,
+    minHeight: 44,
+  },
+  shareText: {
+    color: colors.redDeep,
+    fontSize: 16,
+    fontWeight: '600',
   },
   pressed: {
     opacity: 0.85,

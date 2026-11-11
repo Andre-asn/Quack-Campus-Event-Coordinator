@@ -32,6 +32,7 @@ public class SecurityConfig {
         http.authorizeHttpRequests(auth -> auth
                 .requestMatchers(HttpMethod.GET, "/api/v1/health", "/api/v1/auth/login", "/api/v1/auth/callback")
                 .permitAll()
+                .requestMatchers(HttpMethod.GET, "/share/events/**").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/v1/auth/session").permitAll()
                 .requestMatchers("/oauth2/authorization/**", "/error").permitAll()
                 .anyRequest().authenticated());
