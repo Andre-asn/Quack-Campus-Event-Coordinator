@@ -143,6 +143,21 @@ public class EventService {
         return new EventStateException(HttpStatus.NOT_FOUND, "EVENT_NOT_FOUND", "No event with that id.");
     }
 
+    @Transactional
+    public void cancel(String idText) {
+        User user = currentUser.require();
+        UUID id = uuidOrNull(idText);
+        if (id == null) {
+            throw new EventNotFoundException();
+        }
+        Event event = events.findByIdForUpdate(id).orElseThrow(EventNotFoundException::new);
+        if (!event.getHostId().equals(user.getId())) {
+            throw new EventCancellationException();
+        }
+        // Postgres stores timestamp(6), so keep microseconds or the read-back value drifts.
+        event.cancel(clock.instant().truncatedTo(ChronoUnit.MICROS));
+    }
+
     private static String strip(String value) {
         return value == null ? null : value.strip();
     }

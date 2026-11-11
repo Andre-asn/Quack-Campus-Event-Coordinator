@@ -182,4 +182,11 @@ public class Event {
     public Instant getUpdatedAt() {
         return updatedAt;
     }
+
+    void cancel(Instant when) {
+        if ("active".equals(status)) {
+            status = "cancelled";
+            updatedAt = when;
+        }
+    }
 }

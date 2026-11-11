@@ -8,6 +8,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import edu.stevens.quack.event.EventCancellationException;
 import edu.stevens.quack.event.EventNotFoundException;
 import edu.stevens.quack.event.EventStateException;
 import edu.stevens.quack.event.InvalidEventException;
@@ -57,6 +58,18 @@ public class RequestExceptionHandler {
             default -> "Event request failed";
         };
         ProblemDetail problem = ApiProblems.of(status, ex.code(), title, ex.getMessage());
+        return ResponseEntity.status(problem.getStatus())
+                .contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                .body(problem);
+    }
+
+    @ExceptionHandler(EventCancellationException.class)
+    ResponseEntity<ProblemDetail> eventCancellationForbidden(EventCancellationException ex) {
+        ProblemDetail problem = ApiProblems.of(
+                HttpStatus.FORBIDDEN,
+                "EVENT_FORBIDDEN",
+                "Event action forbidden",
+                ex.getMessage());
         return ResponseEntity.status(problem.getStatus())
                 .contentType(MediaType.APPLICATION_PROBLEM_JSON)
                 .body(problem);
