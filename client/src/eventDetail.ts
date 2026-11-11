@@ -31,25 +31,39 @@ export async function loadEventDetail(
   token?: string | null,
 ): Promise<DetailResult> {
   const query = token ? `?token=${encodeURIComponent(token)}` : '';
-  const response = await fetch(`${apiBaseUrl}/api/v1/events/${encodeURIComponent(id)}${query}`, {
-    // The session goes in our own Cookie header; see the note in auth.ts.
-    credentials: 'omit',
-    headers: {
-      Accept: 'application/json',
-      Cookie: `${sessionCookieName}=${sessionId}`,
-    },
-    signal,
-  });
-  if (response.ok) {
-    return { ok: true, event: (await response.json()) as EventDetail };
+  const timeout = new AbortController();
+  const timer = setTimeout(() => timeout.abort(), 15_000);
+  const onAbort = () => timeout.abort();
+  signal?.addEventListener('abort', onAbort);
+  try {
+    const response = await fetch(`${apiBaseUrl}/api/v1/events/${encodeURIComponent(id)}${query}`, {
+      // The session goes in our own Cookie header; see the note in auth.ts.
+      credentials: 'omit',
+      headers: {
+        Accept: 'application/json',
+        Cookie: `${sessionCookieName}=${sessionId}`,
+      },
+      signal: timeout.signal,
+    });
+    if (response.ok) {
+      return { ok: true, event: (await response.json()) as EventDetail };
+    }
+    if (response.status === 401) {
+      return { ok: false, message: 'Your session has expired. Sign out and sign in again.', retry: false };
+    }
+    if (response.status === 404) {
+      return { ok: false, message: 'This event isn’t available anymore.', retry: false };
+    }
+    return { ok: false, message: 'Couldn’t load this event. Try again.', retry: true };
+  } catch (error) {
+    if (signal?.aborted) {
+      throw error;
+    }
+    return { ok: false, message: 'Couldn’t reach Quack!. Check your connection.', retry: true };
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', onAbort);
   }
-  if (response.status === 401) {
-    return { ok: false, message: 'Your session has expired. Sign out and sign in again.', retry: false };
-  }
-  if (response.status === 404) {
-    return { ok: false, message: 'This event isn’t available anymore.', retry: false };
-  }
-  return { ok: false, message: 'Couldn’t load this event. Try again.', retry: true };
 }
 
 export async function setAttendance(

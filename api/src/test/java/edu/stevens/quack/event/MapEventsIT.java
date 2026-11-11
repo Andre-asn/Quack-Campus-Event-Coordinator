@@ -134,6 +134,31 @@ class MapEventsIT extends PostgresIntegrationTest {
     }
 
     @Test
+    void hidesAStoredShareTokenFromEveryoneButTheHost() {
+        User ada = host("ada");
+        User bea = host("bea");
+        Event event = save(ada, "Public with token", 40.745, -74.025, noonToday());
+        UUID token = UUID.randomUUID();
+        jdbc.update("update events set share_token = ? where id = ?", token, event.getId());
+
+        client.get().uri(mapUri(BBOX, startOfToday(), startOfTomorrow(), 50, null))
+                .header(HttpHeaders.COOKIE, "JSESSIONID=" + sessionFor(bea))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.events[?(@.title == 'Public with token')]").isNotEmpty()
+                .jsonPath("$.events[?(@.title == 'Public with token' && @.shareToken)]").isEmpty();
+
+        client.get().uri(mapUri(BBOX, startOfToday(), startOfTomorrow(), 50, null))
+                .header(HttpHeaders.COOKIE, "JSESSIONID=" + sessionFor(ada))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.events[?(@.title == 'Public with token' && @.shareToken == '%s')]".formatted(token))
+                .isNotEmpty();
+    }
+
+    @Test
     void returnsEventsInsideTheHalfOpenRange() {
         User host = host("ada");
         Instant from = startOfToday();

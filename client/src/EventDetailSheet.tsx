@@ -53,6 +53,8 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose }:
   const [attempt, setAttempt] = useState(0);
   const [now, setNow] = useState(() => new Date());
   const [pending, setPending] = useState(false);
+  const [pendingAction, setPendingAction] = useState<'join' | 'leave' | null>(null);
+  const [needsRefresh, setNeedsRefresh] = useState(false);
   const attendanceRequest = useRef(0);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -73,8 +75,11 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose }:
   useEffect(() => {
     const controller = new AbortController();
     let cancelled = false;
+    attendanceRequest.current += 1;
     setState({ status: 'loading' });
     setPending(false);
+    setPendingAction(null);
+    setNeedsRefresh(false);
     setActionError(null);
     loadEventDetail(sessionId, eventId, controller.signal, token)
       .then((result) => {
@@ -105,6 +110,8 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose }:
     const joining = !event.joined;
     const previous = event;
     setPending(true);
+    setPendingAction(joining ? 'join' : 'leave');
+    setNeedsRefresh(false);
     setActionError(null);
     setState({
       status: 'loaded',
@@ -123,22 +130,37 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose }:
     if (requestId !== attendanceRequest.current) {
       return;
     }
-    setPending(false);
-    const refreshed = await loadEventDetail(sessionId, eventId, undefined, token).catch(() => null);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15_000);
+    let refreshed: Awaited<ReturnType<typeof loadEventDetail>> | null = null;
+    try {
+      refreshed = await loadEventDetail(sessionId, eventId, controller.signal, token);
+    } catch {
+      refreshed = null;
+    } finally {
+      clearTimeout(timer);
+    }
     if (requestId !== attendanceRequest.current) {
       return;
     }
-    if (refreshed && refreshed.ok) {
+    setPending(false);
+    setPendingAction(null);
+    if (refreshed?.ok) {
+      setNeedsRefresh(false);
       setState({ status: 'loaded', event: refreshed.event });
       if (!outcome.ok && refreshed.event.joined !== joining) {
         setActionError(outcome.message);
       }
       return;
     }
-    if (!outcome.ok) {
-      setState({ status: 'loaded', event: previous });
-      setActionError(outcome.message);
+    if (outcome.ok) {
+      setNeedsRefresh(true);
+      setActionError('Couldn’t refresh this event. Try again.');
+      return;
     }
+    setNeedsRefresh(false);
+    setState({ status: 'loaded', event: previous });
+    setActionError(outcome.message);
   }
 
   // Keeps "Starts in 25 min" honest while the sheet stays open.
@@ -222,7 +244,9 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose }:
           event={state.event}
           now={now}
           onAttendance={() => void changeAttendance(state.event)}
+          onRetry={needsRefresh ? () => setAttempt((value) => value + 1) : undefined}
           pending={pending}
+          pendingAction={pendingAction}
         />
       ) : state.status === 'loading' ? (
         <View accessibilityLabel="Loading event" style={styles.placeholder}>
@@ -259,18 +283,32 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose }:
   );
 }
 
+function attendanceLabel(joined: boolean, pendingAction: 'join' | 'leave' | null): string {
+  if (pendingAction === 'join') {
+    return 'Joining...';
+  }
+  if (pendingAction === 'leave') {
+    return 'Leaving...';
+  }
+  return joined ? 'Leave' : 'Join';
+}
+
 function Details({
   event,
   now,
   pending,
+  pendingAction,
   actionError,
   onAttendance,
+  onRetry,
 }: {
   event: EventDetail;
   now: Date;
   pending: boolean;
+  pendingAction: 'join' | 'leave' | null;
   actionError: string | null;
   onAttendance: () => void;
+  onRetry?: () => void;
 }) {
   const startsAt = new Date(event.startsAt);
   const cancelled = event.status === 'cancelled';
@@ -336,22 +374,30 @@ function Details({
 
       {event.status === 'active' || event.joined ? (
         <Pressable
-          accessibilityLabel={event.joined ? 'Leave' : 'Join'}
+          accessibilityLabel={attendanceLabel(event.joined, pendingAction)}
           accessibilityRole="button"
           accessibilityState={{ busy: pending, disabled: pending }}
           disabled={pending}
           onPress={onAttendance}
           style={({ pressed }) => [styles.join, pressed && styles.pressed]}
         >
-          <Text style={styles.joinText}>
-            {pending ? (event.joined ? 'Leaving...' : 'Joining...') : (event.joined ? 'Leave' : 'Join')}
-          </Text>
+          <Text style={styles.joinText}>{attendanceLabel(event.joined, pendingAction)}</Text>
         </Pressable>
       ) : null}
       {actionError ? (
         <Text accessibilityLiveRegion="polite" accessibilityRole="alert" style={styles.actionError}>
           {actionError}
         </Text>
+      ) : null}
+      {onRetry ? (
+        <Pressable
+          accessibilityLabel="Try loading the event again"
+          accessibilityRole="button"
+          onPress={onRetry}
+          style={({ pressed }) => [styles.retry, pressed && styles.pressed]}
+        >
+          <Text style={styles.retryText}>Try again</Text>
+        </Pressable>
       ) : null}
       {event.shareToken ? (
         <Pressable
