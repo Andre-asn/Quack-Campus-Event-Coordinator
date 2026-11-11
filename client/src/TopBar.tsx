@@ -21,13 +21,20 @@ type Props = {
   // null until the first map query answers, so the bar never flashes "0 events".
   count: number | null;
   onOpenList: () => void;
+  // The map couldn't load. The bar still shows, since it is the only way to sign out; the list
+  // button is disabled because there is nothing to list.
+  unavailable?: boolean;
 };
 
 // Figma 03: logo, today's count for this view, the list, and the signed-in user.
-export default function TopBar({ account, count, onOpenList }: Props) {
+export default function TopBar({ account, count, onOpenList, unavailable = false }: Props) {
   const insets = useSafeAreaInsets();
   const { user, busy, message, onSignOut } = account;
-  const summary = count === null ? 'Finding events…' : `${count} ${count === 1 ? 'event' : 'events'} today`;
+  const summary = unavailable
+    ? 'Map unavailable'
+    : count === null
+      ? 'Finding events…'
+      : `${count} ${count === 1 ? 'event' : 'events'} today`;
 
   function confirmSignOut() {
     Alert.alert(user.displayName, user.email, [
@@ -44,10 +51,12 @@ export default function TopBar({ account, count, onOpenList }: Props) {
           {summary}
         </Text>
         <Pressable
-          accessibilityLabel="Events in this view"
+          accessibilityLabel={unavailable ? 'Events in this view, unavailable while the map is down' : 'Events in this view'}
           accessibilityRole="button"
+          accessibilityState={{ disabled: unavailable }}
+          disabled={unavailable}
           onPress={onOpenList}
-          style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
+          style={({ pressed }) => [styles.iconButton, pressed && styles.pressed, unavailable && styles.busy]}
         >
           <ShowListIcon height={24} width={24} />
         </Pressable>

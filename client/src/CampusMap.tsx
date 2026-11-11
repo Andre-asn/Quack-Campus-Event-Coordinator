@@ -178,13 +178,18 @@ export default function CampusMap({
     debounce.current = setTimeout(() => setBbox(next), delay);
   }
 
-  if (!mapboxAccessToken) {
+  // The top bar stays over the fallback: it's the only way to reach Sign out.
+  if (!mapboxAccessToken || failed) {
     return (
-      <MapUnavailable detail="No Mapbox token is configured. Set EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN to a public pk. token in client/.env, then restart the bundler." />
+      <>
+        <MapUnavailable
+          detail={!mapboxAccessToken
+            ? 'No Mapbox token is configured. Set EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN to a public pk. token in client/.env, then restart the bundler.'
+            : 'The map could not load. Check your connection and reopen Quack!.'}
+        />
+        {account ? <TopBar account={account} count={null} onOpenList={() => {}} unavailable /> : null}
+      </>
     );
-  }
-  if (failed) {
-    return <MapUnavailable detail="The map could not load. Check your connection and reopen Quack!." />;
   }
   return (
     <>
