@@ -13,6 +13,8 @@ public record EventDetail(
         String description,
         String category,
         String locationLabel,
+        double latitude,
+        double longitude,
         Instant startsAt,
         Instant endsAt,
         String status,
@@ -20,7 +22,8 @@ public record EventDetail(
         long attendeeCount,
         String visibility,
         @JsonInclude(JsonInclude.Include.NON_NULL) UUID shareToken,
-        boolean joined) {
+        boolean joined,
+        boolean hosting) {
 
     public record Host(String displayName, String avatarUrl) {
     }
