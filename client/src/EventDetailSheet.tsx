@@ -314,6 +314,9 @@ function Details({
 }) {
   const startsAt = new Date(event.startsAt);
   const cancelled = event.status === 'cancelled';
+  // A selected day is presentation context; only a valid end timestamp determines lifecycle.
+  // Legacy NULL end times retain their existing policy and are not inferred to have ended.
+  const ended = !cancelled && isEnded(event.endsAt, now);
   const relative = relativeStart(startsAt, now);
   const meta = relative === 'now'
     ? 'Starting now'
@@ -333,6 +336,10 @@ function Details({
             <View accessibilityLabel="This event was cancelled" style={styles.cancelledChip}>
               <Text style={styles.cancelledText}>Cancelled</Text>
             </View>
+          ) : ended ? (
+            <View accessibilityLabel="This event has ended" style={styles.endedChip}>
+              <Text style={styles.endedText}>Ended</Text>
+            </View>
           ) : (
             <Text style={styles.metaText}>{meta}</Text>
           )}
@@ -349,11 +356,11 @@ function Details({
       </View>
 
       <View style={styles.details}>
-        <View accessible accessibilityLabel={`${formatWhen(startsAt, now)}, ${cancelled ? 'cancelled' : relative}`} style={styles.info}>
+        <View accessible accessibilityLabel={`${formatWhen(startsAt, now)}, ${cancelled ? 'cancelled' : ended ? 'ended' : relative}`} style={styles.info}>
           <ClockIcon height={22} width={22} />
           <View style={styles.infoText}>
             <Text style={styles.infoMain}>{formatWhen(startsAt, now)}</Text>
-            <Text style={styles.infoSub}>{cancelled ? 'Cancelled by the host' : relative}</Text>
+            <Text style={styles.infoSub}>{cancelled ? 'Cancelled by the host' : ended ? 'This event has ended' : relative}</Text>
           </View>
         </View>
         <View accessible accessibilityLabel={`Location: ${event.locationLabel}`} style={styles.info}>
@@ -375,7 +382,7 @@ function Details({
         <Text style={styles.count}>{event.attendeeCount} going</Text>
       </View>
 
-      {event.status === 'active' || event.joined ? (
+      {(event.status === 'active' && !ended) || event.joined ? (
         <Pressable
           accessibilityLabel={attendanceLabel(event.joined, pendingAction)}
           accessibilityRole="button"
@@ -414,6 +421,14 @@ function Details({
       ) : null}
     </ScrollView>
   );
+}
+
+function isEnded(endsAt: string | null, now: Date): boolean {
+  if (!endsAt) {
+    return false;
+  }
+  const end = new Date(endsAt);
+  return Number.isFinite(end.getTime()) && now.getTime() >= end.getTime();
 }
 
 const styles = StyleSheet.create({
@@ -518,6 +533,17 @@ const styles = StyleSheet.create({
   },
   cancelledText: {
     color: colors.redDeep,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  endedChip: {
+    backgroundColor: colors.sand,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  endedText: {
+    color: colors.muted,
     fontSize: 14,
     fontWeight: '600',
   },

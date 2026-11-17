@@ -1,5 +1,5 @@
 import { apiBaseUrl, sessionCookieName } from './config';
-import { campusDayRange } from './campusTime';
+import { campusDayKey, campusDayRange, campusDayRangeForKey } from './campusTime';
 
 export type MapEvent = {
   id: string;
@@ -53,13 +53,16 @@ export function groupBySpot(events: MapEvent[]): Spot[] {
 export async function loadMapEvents(
   sessionId: string,
   bbox: string,
+  selectedDay = campusDayKey(new Date()),
   signal?: AbortSignal,
 ): Promise<{ events: MapEvent[]; unchanged: boolean }> {
   const generation = ++loadGeneration;
   if (cached && cached.sessionId !== sessionId) {
     cached = null;
   }
-  const { from, to } = campusDayRange(new Date());
+  const { from, to } = selectedDay === campusDayKey(new Date())
+    ? campusDayRange(new Date())
+    : campusDayRangeForKey(selectedDay);
   const url = `${apiBaseUrl}/api/v1/events?bbox=${encodeURIComponent(bbox)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=100`;
   const headers: Record<string, string> = {
     Accept: 'application/json',
