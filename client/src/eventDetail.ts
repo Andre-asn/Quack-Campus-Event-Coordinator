@@ -8,6 +8,7 @@ export type EventDetail = {
   category: string;
   locationLabel: string;
   startsAt: string;
+  endsAt: string | null;
   status: 'active' | 'cancelled';
   host: {
     displayName: string;

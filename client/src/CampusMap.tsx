@@ -8,6 +8,7 @@ import { StatusBar } from 'expo-status-bar';
 import { mapboxAccessToken, stevensCenter } from './config';
 import { campusDayKey } from './campusTime';
 import { groupBySpot, loadMapEvents, type MapEvent, type Spot } from './mapEvents';
+import { colors } from './theme';
 
 if (mapboxAccessToken) {
   void Mapbox.setAccessToken(mapboxAccessToken);
@@ -42,6 +43,8 @@ type Props = {
   onPinMoved?: (place: PinnedPlace) => void;
   // Tapping a host bubble, or a row in a list, opens that event's detail sheet.
   onOpenEvent?: (eventId: string) => void;
+  // Supplied by the date stepper; omitted until the stepper is mounted by its parent.
+  selectedDay?: string;
 };
 
 // Standard keeps its place labels inside an imported style that queries cannot reach, so an
@@ -73,27 +76,30 @@ async function placeAt(map: MapView | null, center: Position): Promise<PinnedPla
   return { latitude, longitude, name };
 }
 
-export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, onPinMoved, onOpenEvent }: Props) {
+export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, onPinMoved, onOpenEvent, selectedDay }: Props) {
   const insets = useSafeAreaInsets();
   const mapRef = useRef<MapView>(null);
   // Lookups can finish out of order; only the newest may move the pin.
   const latestLookup = useRef(0);
   const [failed, setFailed] = useState(false);
   const [lightPreset, setLightPreset] = useState(() => lightPresetFor(new Date().getHours()));
-  const [day, setDay] = useState(() => campusDayKey(new Date()));
+  const [currentDay, setCurrentDay] = useState(() => campusDayKey(new Date()));
+  const day = selectedDay ?? currentDay;
+  const today = campusDayKey(new Date());
   const [bbox, setBbox] = useState<string | null>(null);
   const [events, setEvents] = useState<MapEvent[]>([]);
   const [loadError, setLoadError] = useState(false);
   const [showAll, setShowAll] = useState<Spot | null>(null);
   const [viewList, setViewList] = useState(false);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadedDay = useRef<string | null>(null);
 
   // Keep the lighting in step with the clock while the app stays open.
   useEffect(() => {
     const timer = setInterval(() => {
       const now = new Date();
       setLightPreset(lightPresetFor(now.getHours()));
-      setDay(campusDayKey(now));
+      setCurrentDay(campusDayKey(now));
     }, 60_000);
     return () => clearInterval(timer);
   }, []);
@@ -114,15 +120,19 @@ export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, 
     const controller = new AbortController();
     let cancelled = false;
     // Keep the current pins until the new set arrives; clearing first made them flash on every pan.
+    if (loadedDay.current !== day) {
+      setEvents([]);
+    }
     setLoadError(false);
     setShowAll(null);
     setViewList(false);
-    void loadMapEvents(sessionId, bbox, controller.signal)
+    void loadMapEvents(sessionId, bbox, day, controller.signal)
       .then((result) => {
         if (cancelled) {
           return;
         }
         setEvents(result.events);
+        loadedDay.current = day;
         setLoadError(false);
       })
       .catch((error: unknown) => {
@@ -207,6 +217,7 @@ export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, 
             coordinate={[spot.longitude, spot.latitude]}
           >
             <SpotBubble
+              past={day !== today}
               onOpen={onOpenEvent}
               onShowAll={() => setShowAll(spot)}
               spot={spot}
@@ -256,10 +267,12 @@ export default function CampusMap({ sessionId, refreshKey = 0, bottomInset = 0, 
 
 function SpotBubble({
   spot,
+  past,
   onOpen,
   onShowAll,
 }: {
   spot: Spot;
+  past: boolean;
   // Absent while pinning a new event; a bubble then opens Show all, as before the detail sheet.
   onOpen?: (eventId: string) => void;
   onShowAll: () => void;
@@ -271,12 +284,12 @@ function SpotBubble({
       {visible.map((event, index) => (
         <Pressable
           accessibilityHint={onOpen ? 'Opens event details' : 'Shows the events here'}
-          accessibilityLabel={`${event.title}, hosted by ${event.host.displayName}`}
+          accessibilityLabel={`${event.title}, hosted by ${event.host.displayName}${past ? ', past event' : ''}`}
           accessibilityRole="button"
           key={event.id}
           onPress={onOpen ? () => onOpen(event.id) : onShowAll}
         >
-          <Avatar event={event} overlap={index > 0} />
+          <Avatar event={event} overlap={index > 0} past={past} />
         </Pressable>
       ))}
       {overflow ? (
@@ -284,7 +297,7 @@ function SpotBubble({
           accessibilityRole="button"
           accessibilityLabel="Show all"
           onPress={onShowAll}
-          style={styles.ellipsis}
+          style={[styles.ellipsis, past && styles.pastPin]}
         >
           <Text style={styles.ellipsisText}>...</Text>
         </Pressable>
@@ -293,13 +306,13 @@ function SpotBubble({
   );
 }
 
-function Avatar({ event, overlap = false }: { event: MapEvent; overlap?: boolean }) {
+function Avatar({ event, overlap = false, past = false }: { event: MapEvent; overlap?: boolean; past?: boolean }) {
   const shift = overlap ? styles.overlap : null;
   if (event.host.avatarUrl) {
-    return <Image accessibilityLabel={event.host.displayName} source={{ uri: event.host.avatarUrl }} style={[styles.avatar, shift]} />;
+    return <Image accessibilityLabel={event.host.displayName} source={{ uri: event.host.avatarUrl }} style={[styles.avatar, shift, past && styles.pastPin]} />;
   }
   return (
-    <View accessibilityLabel={event.host.displayName} style={[styles.avatarFallback, shift]}>
+    <View accessibilityLabel={event.host.displayName} style={[styles.avatarFallback, shift, past && styles.pastAvatar]}>
       <Text style={styles.fallbackText}>{event.host.displayName.slice(0, 1)}</Text>
     </View>
   );
@@ -404,6 +417,9 @@ const styles = StyleSheet.create({
     height: 32,
     width: 32,
   },
+  pastPin: {
+    opacity: 0.58,
+  },
   overlap: {
     marginLeft: -6,
   },
@@ -416,6 +432,10 @@ const styles = StyleSheet.create({
     height: 32,
     justifyContent: 'center',
     width: 32,
+  },
+  pastAvatar: {
+    backgroundColor: colors.muted,
+    opacity: 0.72,
   },
   fallbackText: {
     color: '#fff',
