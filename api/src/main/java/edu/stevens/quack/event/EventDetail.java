@@ -3,8 +3,10 @@ package edu.stevens.quack.event;
 import java.time.Instant;
 import java.util.UUID;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 // What the detail sheet shows. Attendee names are deliberately absent: only attendees may see them,
-// through the attendee list.
+// through the attendee list. The share token is present only for the host.
 public record EventDetail(
         UUID id,
         String title,
@@ -15,7 +17,10 @@ public record EventDetail(
         Instant endsAt,
         String status,
         Host host,
-        long attendeeCount) {
+        long attendeeCount,
+        String visibility,
+        @JsonInclude(JsonInclude.Include.NON_NULL) UUID shareToken,
+        boolean joined) {
 
     public record Host(String displayName, String avatarUrl) {
     }

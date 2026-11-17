@@ -1,5 +1,7 @@
 package edu.stevens.quack.event;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Clock;
 import java.util.UUID;
 
@@ -98,9 +100,14 @@ public class AttendanceService {
             return false;
         }
         try {
-            UUID parsed = UUID.fromString(supplied);
-            return parsed.toString().equalsIgnoreCase(supplied)
-                    && expected.equals(parsed);
+            String text = supplied.trim();
+            UUID parsed = UUID.fromString(text);
+            if (!parsed.toString().equalsIgnoreCase(text)) {
+                return false;
+            }
+            return MessageDigest.isEqual(
+                    expected.toString().getBytes(StandardCharsets.US_ASCII),
+                    parsed.toString().getBytes(StandardCharsets.US_ASCII));
         } catch (IllegalArgumentException ex) {
             return false;
         }

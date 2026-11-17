@@ -9,7 +9,28 @@ export type NewEvent = {
   locationLabel: string;
   startsAt: string;
   endsAt: string;
+  visibility: 'public' | 'link_only';
 };
+
+export type CreatedEvent = {
+  id: string;
+  visibility: 'public' | 'link_only';
+  shareToken: string | null;
+};
+
+// The token stays in the fragment, so loading this page does not send it to the server.
+export function eventShareLink(id: string, shareToken: string): string {
+  return `${apiBaseUrl}/share/events/${id}#token=${shareToken}`;
+}
+
+// quack://events/{id}?token=... and the Android intent URL both carry the id this way.
+export function eventFromLink(url: string): { id: string; token: string } | null {
+  const match = url.match(/events\/([0-9a-fA-F-]{36})\?token=([0-9a-fA-F-]{36})/);
+  if (!match) {
+    return null;
+  }
+  return { id: match[1], token: match[2] };
+}
 
 // Server field name to its message, from the 422 INVALID_EVENT `errors` list.
 export type FieldErrors = Partial<Record<string, string>>;
@@ -17,7 +38,7 @@ export type FieldErrors = Partial<Record<string, string>>;
 export async function createEvent(
   sessionId: string,
   event: NewEvent,
-): Promise<{ ok: true } | { ok: false; message: string; fieldErrors: FieldErrors }> {
+): Promise<{ ok: true; event: CreatedEvent } | { ok: false; message: string; fieldErrors: FieldErrors }> {
   // Android's default client has no read timeout, so a stalled request would leave Post stuck.
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15_000);
@@ -35,7 +56,15 @@ export async function createEvent(
       body: JSON.stringify(event),
     });
     if (response.ok) {
-      return { ok: true };
+      const created = (await response.json()) as Partial<CreatedEvent>;
+      return {
+        ok: true,
+        event: {
+          id: created.id ?? '',
+          visibility: created.visibility === 'link_only' ? 'link_only' : 'public',
+          shareToken: created.shareToken ?? null,
+        },
+      };
     }
     if (response.status === 401) {
       return { ok: false, message: 'Your session has expired. Sign out and sign in again.', fieldErrors: {} };

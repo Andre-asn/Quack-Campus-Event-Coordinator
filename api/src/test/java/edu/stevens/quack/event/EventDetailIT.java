@@ -86,7 +86,10 @@ class EventDetailIT extends PostgresIntegrationTest {
                 .jsonPath("$.category").isEqualTo("study")
                 .jsonPath("$.description").isEqualTo("Studying for CS102!")
                 .jsonPath("$.status").isEqualTo("active")
-                .jsonPath("$.attendeeCount").isEqualTo(0);
+                .jsonPath("$.attendeeCount").isEqualTo(0)
+                .jsonPath("$.visibility").isEqualTo("public")
+                .jsonPath("$.joined").isEqualTo(false)
+                .jsonPath("$.shareToken").doesNotExist();
     }
 
     @Test
@@ -106,7 +109,7 @@ class EventDetailIT extends PostgresIntegrationTest {
         Map<String, Object> json = JsonPath.read(body, "$");
         assertThat(json).containsOnlyKeys(
                 "id", "title", "description", "category", "locationLabel", "startsAt", "endsAt", "status", "host",
-                "attendeeCount");
+                "attendeeCount", "visibility", "joined");
         Map<String, Object> host = JsonPath.read(body, "$.host");
         assertThat(host).containsOnlyKeys("displayName", "avatarUrl");
     }
@@ -123,6 +126,45 @@ class EventDetailIT extends PostgresIntegrationTest {
                 .expectBody()
                 .jsonPath("$.status").isEqualTo("cancelled")
                 .jsonPath("$.title").isEqualTo("CS102 study group");
+    }
+
+    @Test
+    void reportsWhetherTheViewerHasJoined() {
+        User grace = user("grace");
+        Event event = save(user("ada"));
+
+        client.get().uri("/api/v1/events/{id}", event.getId())
+                .header(HttpHeaders.COOKIE, "JSESSIONID=" + sessionFor(grace))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.joined").isEqualTo(false)
+                .jsonPath("$.attendeeCount").isEqualTo(0);
+
+        jdbc.update("insert into event_attendance (event_id, user_id) values (?, ?)", event.getId(), grace.getId());
+
+        client.get().uri("/api/v1/events/{id}", event.getId())
+                .header(HttpHeaders.COOKIE, "JSESSIONID=" + sessionFor(grace))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.joined").isEqualTo(true)
+                .jsonPath("$.attendeeCount").isEqualTo(1);
+    }
+
+    @Test
+    void returnsTheShareTokenToTheHost() {
+        User host = user("ada");
+        Event event = save(host);
+        UUID token = linkOnly(event);
+
+        client.get().uri("/api/v1/events/{id}?token={token}", event.getId(), token)
+                .header(HttpHeaders.COOKIE, "JSESSIONID=" + sessionFor(host))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.shareToken").isEqualTo(token.toString())
+                .jsonPath("$.visibility").isEqualTo("link_only");
     }
 
     @Test
@@ -205,6 +247,23 @@ class EventDetailIT extends PostgresIntegrationTest {
         expectNotFound("/api/v1/events/1-1-1-1-1", session);
     }
 
+    @Test
+    void sharePageSaysTheAppIsNotInstalledAndDoesNotEchoAToken() {
+        String token = UUID.randomUUID().toString();
+
+        String body = client.get().uri("/share/events/{id}?token={token}", UUID.randomUUID(), token)
+                .exchange()
+                .expectStatus().isOk()
+                .expectHeader().contentTypeCompatibleWith(MediaType.TEXT_HTML)
+                .expectBody(String.class)
+                .returnResult()
+                .getResponseBody();
+
+        assertThat(body).contains("Open Quack");
+        assertThat(body).contains("isn't installed on this device.");
+        assertThat(body).doesNotContain(token);
+    }
+
     private void expectNotFound(String uri, String session) {
         client.get().uri(uri)
                 .header(HttpHeaders.COOKIE, "JSESSIONID=" + session)
@@ -239,6 +298,8 @@ class EventDetailIT extends PostgresIntegrationTest {
                 "Library, 2nd floor",
                 STARTS_AT,
                 ENDS_AT,
+                "public",
+                null,
                 Instant.parse("2026-10-21T12:00:00Z")));
     }
 

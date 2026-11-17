@@ -29,6 +29,15 @@ public class AttendanceRepository {
                 """, eventId, userId);
     }
 
+    public boolean isAttending(UUID eventId, UUID userId) {
+        Integer found = jdbc.queryForObject("""
+                select count(*)
+                from event_attendance
+                where event_id = ? and user_id = ?
+                """, Integer.class, eventId, userId);
+        return found != null && found > 0;
+    }
+
     public long countByEventId(UUID eventId) {
         Long count = jdbc.queryForObject("""
                 select count(*)

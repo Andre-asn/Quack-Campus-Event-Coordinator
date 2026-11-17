@@ -426,6 +426,8 @@ class AttendanceIT extends PostgresIntegrationTest {
                 "Library",
                 now.plus(2, ChronoUnit.HOURS),
                 now.plus(4, ChronoUnit.HOURS),
+                "public",
+                null,
                 now);
 
         return events.saveAndFlush(event).getId();
