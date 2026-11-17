@@ -13,7 +13,7 @@ import type { Position } from 'geojson';
 import { StatusBar } from 'expo-status-bar';
 
 import { mapboxAccessToken, stevensCenter } from './config';
-import { campusDayKey } from './campusTime';
+import { campusDayKey, isCampusDayBefore } from './campusTime';
 import EventFilters from './EventFilters';
 import { applyFilter, isFiltering, noFilter, type EventFilter } from './listFilters';
 import { groupBySpot, loadMapEvents, type MapEvent, type Spot } from './mapEvents';
@@ -109,9 +109,9 @@ export default function CampusMap({
   const [lightPreset, setLightPreset] = useState(() => lightPresetFor(new Date().getHours()));
   const [currentDay, setCurrentDay] = useState(() => campusDayKey(new Date()));
   const day = selectedDay ?? currentDay;
-  const today = campusDayKey(new Date());
   // Ticks with the lighting timer, so a pin turns to "Now" within a minute of its start.
   const [now, setNow] = useState(() => new Date());
+  const past = isCampusDayBefore(day, now);
   const [bbox, setBbox] = useState<string | null>(null);
   const [events, setEvents] = useState<MapEvent[]>([]);
   // False until the first query answers, so the top bar doesn't claim "0 events today" while loading.
@@ -256,7 +256,7 @@ export default function CampusMap({
             coordinate={[spot.longitude, spot.latitude]}
           >
             <SpotBubble
-              past={day !== today}
+              past={past}
               now={now}
               onOpen={onOpenEvent}
               onShowAll={() => setShowAll(spot)}
