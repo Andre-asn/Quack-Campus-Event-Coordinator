@@ -5,8 +5,41 @@ export function campusDayKey(now: Date): string {
   return `${day.year}-${day.month}-${day.day}`;
 }
 
+export function isCampusDayBefore(dayKey: string, now: Date): boolean {
+  const day = parseCalendarDay(dayKey);
+  const today = campusDate(now);
+  return Date.UTC(day.year, day.month - 1, day.day)
+    < Date.UTC(today.year, today.month - 1, today.day);
+}
+
 export function campusDayRange(now: Date): { from: string; to: string } {
   const today = campusDate(now);
+  return campusDayRangeForCalendarDay(today);
+}
+
+// The date stepper owns the selected-day value. Keeping the map query contract as a
+// campus calendar-day key avoids converting a selected local day through the device zone.
+export function campusDayRangeForKey(dayKey: string): { from: string; to: string } {
+  const day = parseCalendarDay(dayKey);
+  return campusDayRangeForCalendarDay(day);
+}
+
+function parseCalendarDay(dayKey: string): CalendarDay {
+  const match = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(dayKey);
+  if (!match) {
+    throw new Error('Invalid campus day key');
+  }
+  const day = { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) };
+  const normalized = new Date(Date.UTC(day.year, day.month - 1, day.day));
+  if (normalized.getUTCFullYear() !== day.year
+      || normalized.getUTCMonth() + 1 !== day.month
+      || normalized.getUTCDate() !== day.day) {
+    throw new Error('Invalid campus day key');
+  }
+  return day;
+}
+
+function campusDayRangeForCalendarDay(today: CalendarDay): { from: string; to: string } {
   const tomorrow = addDays(today, 1);
   return {
     from: campusMidnight(today).toISOString(),

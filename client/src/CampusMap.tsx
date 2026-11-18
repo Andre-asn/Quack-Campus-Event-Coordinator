@@ -13,7 +13,7 @@ import type { Position } from 'geojson';
 import { StatusBar } from 'expo-status-bar';
 
 import { mapboxAccessToken, stevensCenter } from './config';
-import { campusDayKey } from './campusTime';
+import { campusDayKey, isCampusDayBefore } from './campusTime';
 import EventFilters from './EventFilters';
 import { applyFilter, isFiltering, noFilter, type EventFilter } from './listFilters';
 import { groupBySpot, loadMapEvents, type MapEvent, type Spot } from './mapEvents';
@@ -57,6 +57,8 @@ type Props = {
   onPinMoved?: (place: PinnedPlace) => void;
   // Tapping a host bubble, or a row in a list, opens that event's detail sheet.
   onOpenEvent?: (eventId: string, token?: string) => void;
+  // Supplied by the date stepper; omitted until the stepper is mounted by its parent.
+  selectedDay?: string;
   // The signed-in user, for the top bar. Absent hides the bar (while a sheet covers the map).
   account?: Account;
 };
@@ -97,6 +99,7 @@ export default function CampusMap({
   onPinMoved,
   onOpenEvent,
   account,
+  selectedDay,
 }: Props) {
   const insets = useSafeAreaInsets();
   const mapRef = useRef<MapView>(null);
@@ -104,9 +107,11 @@ export default function CampusMap({
   const latestLookup = useRef(0);
   const [failed, setFailed] = useState(false);
   const [lightPreset, setLightPreset] = useState(() => lightPresetFor(new Date().getHours()));
-  const [day, setDay] = useState(() => campusDayKey(new Date()));
+  const [currentDay, setCurrentDay] = useState(() => campusDayKey(new Date()));
+  const day = selectedDay ?? currentDay;
   // Ticks with the lighting timer, so a pin turns to "Now" within a minute of its start.
   const [now, setNow] = useState(() => new Date());
+  const past = isCampusDayBefore(day, now);
   const [bbox, setBbox] = useState<string | null>(null);
   const [events, setEvents] = useState<MapEvent[]>([]);
   // False until the first query answers, so the top bar doesn't claim "0 events today" while loading.
@@ -117,13 +122,14 @@ export default function CampusMap({
   // Lives here because the map stays mounted: kept while the app is open, not across restarts.
   const [listFilter, setListFilter] = useState<EventFilter>(noFilter);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadedDay = useRef<string | null>(null);
 
   // Keep the lighting in step with the clock while the app stays open.
   useEffect(() => {
     const timer = setInterval(() => {
       const now = new Date();
       setLightPreset(lightPresetFor(now.getHours()));
-      setDay(campusDayKey(now));
+      setCurrentDay(campusDayKey(now));
       setNow(now);
     }, 60_000);
     return () => clearInterval(timer);
@@ -145,15 +151,19 @@ export default function CampusMap({
     const controller = new AbortController();
     let cancelled = false;
     // Keep the current pins until the new set arrives; clearing first made them flash on every pan.
+    if (loadedDay.current !== day) {
+      setEvents([]);
+    }
     setLoadError(false);
     setShowAll(null);
     setViewList(false);
-    void loadMapEvents(sessionId, bbox, controller.signal)
+    void loadMapEvents(sessionId, bbox, day, controller.signal)
       .then((result) => {
         if (cancelled) {
           return;
         }
         setEvents(result.events);
+        loadedDay.current = day;
         setLoaded(true);
         setLoadError(false);
       })
@@ -246,6 +256,7 @@ export default function CampusMap({
             coordinate={[spot.longitude, spot.latitude]}
           >
             <SpotBubble
+              past={past}
               now={now}
               onOpen={onOpenEvent}
               onShowAll={() => setShowAll(spot)}
@@ -303,21 +314,23 @@ function hasStarted(event: MapEvent, now: Date): boolean {
   return new Date(event.startsAt).getTime() <= now.getTime();
 }
 
-function pinLabel(event: MapEvent, now: Date): string {
+function pinLabel(event: MapEvent, now: Date, past: boolean): string {
   const when = hasStarted(event, now) ? `started at ${startTime(event)}` : `starts at ${startTime(event)}`;
   const linkOnly = event.visibility === 'link_only' ? 'Link only. ' : '';
-  return `${linkOnly}${event.title}, hosted by ${event.host.displayName}, ${when}`;
+  return `${linkOnly}${event.title}, hosted by ${event.host.displayName}, ${past ? 'past event, ' : ''}${when}`;
 }
 
 // Figma 03. One event: a time tag (host + start time, yellow "Now" once started). Several: up to
 // three overlapping hosts and a dark "…" that opens Show all. Both point at the spot.
 function SpotBubble({
   spot,
+  past,
   now,
   onOpen,
   onShowAll,
 }: {
   spot: Spot;
+  past: boolean;
   now: Date;
   // Absent while pinning a new event; a tap then opens Show all, as before the detail sheet.
   onOpen?: (eventId: string, token?: string) => void;
@@ -334,20 +347,21 @@ function SpotBubble({
       <View style={styles.pin}>
         <Pressable
           accessibilityHint={hint}
-          accessibilityLabel={pinLabel(event, now)}
+          accessibilityLabel={pinLabel(event, now, past)}
           accessibilityRole="button"
           onPress={() => open(event)}
           style={({ pressed }) => [
             styles.tag,
-            started && styles.tagNow,
+            past && styles.pastTag,
+            !past && started && styles.tagNow,
             linkOnly && styles.tagLinkOnly,
             pressed && styles.pinPressed,
           ]}
         >
           <HostAvatar host={event.host} size={24} style={linkOnly ? styles.linkOnlyRing : undefined} />
-          <Text style={styles.tagText}>{started ? 'Now' : startTime(event)}</Text>
+          <Text style={styles.tagText}>{!past && started ? 'Now' : startTime(event)}</Text>
         </Pressable>
-        {started ? <PointerYellow height={7} width={12} /> : <PointerWhite height={7} width={12} />}
+        {!past && started ? <PointerYellow height={7} width={12} /> : <PointerWhite height={7} width={12} />}
       </View>
     );
   }
@@ -359,17 +373,17 @@ function SpotBubble({
         {visible.map((event) => (
           <Pressable
             accessibilityHint={hint}
-            accessibilityLabel={pinLabel(event, now)}
+            accessibilityLabel={pinLabel(event, now, past)}
             accessibilityRole="button"
             key={event.id}
             onPress={() => open(event)}
-            style={({ pressed }) => [styles.clusterAvatar, pressed && styles.pinPressed]}
+              style={({ pressed }) => [styles.clusterAvatar, past && styles.pastPin, pressed && styles.pinPressed]}
           >
             <HostAvatar
               host={event.host}
               ringed
               size={28}
-              style={event.visibility === 'link_only' ? styles.linkOnlyRing : undefined}
+              style={[event.visibility === 'link_only' ? styles.linkOnlyRing : undefined, past && styles.pastPin]}
             />
           </Pressable>
         ))}
@@ -378,7 +392,7 @@ function SpotBubble({
           accessibilityRole="button"
           hitSlop={6}
           onPress={onShowAll}
-          style={({ pressed }) => [styles.dotsBubble, pressed && styles.pinPressed]}
+          style={({ pressed }) => [styles.dotsBubble, past && styles.pastPin, pressed && styles.pinPressed]}
         >
           <Dots height={4} width={18} />
         </Pressable>
@@ -599,6 +613,12 @@ const styles = StyleSheet.create({
   },
   linkOnlyRing: {
     borderColor: colors.yellow,
+  },
+  pastPin: {
+    opacity: 0.58,
+  },
+  pastTag: {
+    backgroundColor: colors.sand,
   },
   tagText: {
     color: colors.ink,
