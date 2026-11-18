@@ -181,6 +181,7 @@ function QuackApp() {
             setOpenEventId(null);
             setOpenToken(null);
           }}
+          onChanged={() => setMapRefresh((value) => value + 1)}
           token={openToken}
           sessionId={screen.session.sessionId}
         />
