@@ -29,7 +29,7 @@ import CloseIcon from '../assets/create/close.svg';
 import { categoryLabel } from './categories';
 import { loadAnnouncements, postAnnouncement, type Announcement } from './announcements';
 import { loadEventDetail, setAttendance, type EventDetail } from './eventDetail';
-import { chooseReminder, clearReminder, loadReminder, type LeadMinutes } from './reminders';
+import { cancelLocalReminder, chooseReminder, clearReminder, loadReminder, type LeadMinutes } from './reminders';
 import { eventShareLink } from './events';
 import HostAvatar from './HostAvatar';
 // Reanimated's withTiming needs the worklet easing, not core Animated's easeOut.
@@ -95,7 +95,11 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose }:
           ? { status: 'loaded', event: result.event }
           : { status: 'failed', message: result.message, retry: result.retry });
         if (result.ok && (result.event.status === 'cancelled' || !result.event.joined)) {
-          void clearReminder(sessionId, eventId, token);
+          void clearReminder(sessionId, eventId, token).then((cleared) => {
+            if (!cleared) {
+              void cancelLocalReminder(eventId);
+            }
+          });
         }
       })
       .catch(() => {
@@ -154,7 +158,10 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose }:
     setPending(false);
     setPendingAction(null);
     if (outcome.ok && !joining) {
-      void clearReminder(sessionId, eventId, token);
+      const cleared = await clearReminder(sessionId, eventId, token);
+      if (!cleared) {
+        await cancelLocalReminder(eventId);
+      }
     }
     if (refreshed?.ok) {
       setNeedsRefresh(false);
@@ -351,7 +358,7 @@ function Details({
             <View accessibilityLabel="This event was cancelled" style={styles.cancelledChip}>
               <Text style={styles.cancelledText}>Cancelled</Text>
             </View>
-          ) : event.startingSoon ? (
+          ) : event.startingSoon && startsAt.getTime() > now.getTime() ? (
             <View accessibilityLabel="Starting soon" style={styles.soonChip}>
               <Text style={styles.soonText}>Starting soon</Text>
             </View>
@@ -455,17 +462,26 @@ function Announcements({
   sessionId: string;
   token?: string | null;
 }) {
-  const [items, setItems] = useState<Announcement[]>([]);
+  const [items, setItems] = useState<Announcement[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [posting, setPosting] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
+    setItems(null);
+    setLoadError(null);
     loadAnnouncements(sessionId, event.id, token).then((result) => {
-      if (!cancelled && result.ok) {
-        setItems(result.announcements);
+      if (cancelled) {
+        return;
       }
+      if (result.ok) {
+        setItems(result.announcements);
+        return;
+      }
+      setItems([]);
+      setLoadError(result.message);
     });
     return () => {
       cancelled = true;
@@ -485,14 +501,20 @@ function Announcements({
       return;
     }
     setDraft('');
-    setItems((current) => [outcome.announcement, ...current]);
+    setItems((current) => [outcome.announcement, ...(current ?? [])]);
   }
 
   return (
     <View style={styles.extra}>
       <Text style={styles.extraTitle}>Announcements</Text>
-      {items.length === 0 ? <Text style={styles.rowMeta}>No announcements yet.</Text> : null}
-      {items.map((item) => (
+      {loadError ? (
+        <Text accessibilityRole="alert" style={styles.actionError}>{loadError}</Text>
+      ) : items === null ? (
+        <Text style={styles.rowMeta}>Loading announcements...</Text>
+      ) : items.length === 0 ? (
+        <Text style={styles.rowMeta}>No announcements yet.</Text>
+      ) : null}
+      {(items ?? []).map((item) => (
         <View key={item.id}>
           <Text style={styles.extraBody}>{item.body}</Text>
           <Text style={styles.rowMeta}>{new Date(item.createdAt).toLocaleString()}</Text>
@@ -503,7 +525,10 @@ function Announcements({
           <TextInput
             accessibilityLabel="Announcement"
             maxLength={280}
-            onChangeText={setDraft}
+            onChangeText={(text) => {
+              setDraft(text);
+              setMessage(null);
+            }}
             placeholder="Where to meet, or what to bring"
             style={styles.input}
             value={draft}
@@ -555,9 +580,21 @@ function Reminder({
     const outcome = await chooseReminder(sessionId, event.id, event.title, event.startsAt, next, token);
     if (!outcome.ok) {
       setMessage(outcome.message);
+      const current = await loadReminder(sessionId, event.id, token);
+      setLead(current);
       return;
     }
     setLead(next);
+  }
+
+  async function turnOff() {
+    setMessage(null);
+    const cleared = await clearReminder(sessionId, event.id, token);
+    if (!cleared) {
+      setMessage('Couldn’t turn off the reminder. Try again.');
+      return;
+    }
+    setLead(null);
   }
 
   return (
@@ -586,11 +623,7 @@ function Reminder({
           <Pressable
             accessibilityLabel="Don't remind me"
             accessibilityRole="button"
-            onPress={() => {
-              void clearReminder(sessionId, event.id, token);
-              setLead(null);
-              setMessage(null);
-            }}
+            onPress={() => void turnOff()}
             style={({ pressed }) => [styles.share, pressed && styles.pressed]}
           >
             <Text style={styles.shareText}>Don't remind me</Text>

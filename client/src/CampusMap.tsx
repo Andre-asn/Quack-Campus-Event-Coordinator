@@ -122,7 +122,9 @@ export default function CampusMap({
   const [viewList, setViewList] = useState(false);
   // Lives here because the map stays mounted: kept while the app is open, not across restarts.
   const [listFilter, setListFilter] = useState<EventFilter>(noFilter);
-  const [freeWindow, setFreeWindow] = useState<FreeWindow | null>(null);
+  const [freeWindow, setFreeWindow] = useState<(FreeWindow & { dayKey: string }) | null>(null);
+  const [boundaryRefresh, setBoundaryRefresh] = useState(0);
+  const queryWindow = freeWindow?.dayKey === day ? freeWindow : null;
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadedDay = useRef<string | null>(null);
 
@@ -157,7 +159,7 @@ export default function CampusMap({
       setEvents([]);
     }
     setLoadError(false);
-    void loadMapEvents(sessionId, bbox, day, freeWindow, controller.signal)
+    void loadMapEvents(sessionId, bbox, day, queryWindow, controller.signal)
       .then((result) => {
         if (cancelled) {
           return;
@@ -177,7 +179,28 @@ export default function CampusMap({
       cancelled = true;
       controller.abort();
     };
-  }, [bbox, day, freeWindow, refreshKey, sessionId]);
+  }, [bbox, boundaryRefresh, day, queryWindow, refreshKey, sessionId]);
+
+  // The free window belongs to one campus day. Drop it as soon as the day changes so the next
+  // query does not keep yesterday's bounds.
+  useEffect(() => {
+    setFreeWindow((current) => (current && current.dayKey !== day ? null : current));
+  }, [day]);
+
+  // Refetch when an event crosses an hour before its start, or its start, so every client
+  // picks up the server's starting-soon flag at the same boundary.
+  useEffect(() => {
+    const upcoming = events.flatMap((event) => {
+      const start = new Date(event.startsAt).getTime();
+      return [start - 3_600_000, start];
+    }).filter((time) => time > Date.now());
+    if (upcoming.length === 0) {
+      return;
+    }
+    const delay = Math.min(...upcoming) - Date.now() + 250;
+    const timer = setTimeout(() => setBoundaryRefresh((value) => value + 1), delay);
+    return () => clearTimeout(timer);
+  }, [events]);
 
   useEffect(() => {
     setShowAll(null);
@@ -285,6 +308,7 @@ export default function CampusMap({
       <EventList
         closeLabel="Close show all"
         events={showAll?.events ?? []}
+        now={now}
         onClose={() => setShowAll(null)}
         onOpen={onOpenEvent && ((id, token) => {
           setShowAll(null);
@@ -298,9 +322,10 @@ export default function CampusMap({
         dayKey={day}
         events={events}
         filter={listFilter}
-        freeWindow={freeWindow}
+        freeWindow={queryWindow}
+        now={now}
         onClose={() => setViewList(false)}
-        onFreeWindow={setFreeWindow}
+        onFreeWindow={(value) => setFreeWindow(value ? { ...value, dayKey: day } : null)}
         onFilterChange={setListFilter}
         onOpen={onOpenEvent && ((id, token) => {
           setViewList(false);
@@ -322,10 +347,14 @@ function hasStarted(event: MapEvent, now: Date): boolean {
   return new Date(event.startsAt).getTime() <= now.getTime();
 }
 
+function showsStartingSoon(event: MapEvent, now: Date): boolean {
+  return event.startingSoon && !hasStarted(event, now);
+}
+
 function pinLabel(event: MapEvent, now: Date, past: boolean): string {
   const when = hasStarted(event, now) ? `started at ${startTime(event)}` : `starts at ${startTime(event)}`;
   const linkOnly = event.visibility === 'link_only' ? 'Link only. ' : '';
-  const soon = event.startingSoon ? 'Starting soon. ' : '';
+  const soon = showsStartingSoon(event, now) ? 'Starting soon. ' : '';
   return `${linkOnly}${soon}${event.title}, hosted by ${event.host.displayName}, ${past ? 'past event, ' : ''}${when}`;
 }
 
@@ -369,7 +398,7 @@ function SpotBubble({
         >
           <HostAvatar host={event.host} size={24} style={linkOnly ? styles.linkOnlyRing : undefined} />
           <Text style={styles.tagText}>
-            {!past && event.startingSoon ? 'Soon' : !past && started ? 'Now' : startTime(event)}
+            {!past && showsStartingSoon(event, now) ? 'Soon' : !past && started ? 'Now' : startTime(event)}
           </Text>
         </Pressable>
         {!past && started ? <PointerYellow height={7} width={12} /> : <PointerWhite height={7} width={12} />}
@@ -396,6 +425,7 @@ function SpotBubble({
               size={28}
               style={[event.visibility === 'link_only' ? styles.linkOnlyRing : undefined, past && styles.pastPin]}
             />
+            {showsStartingSoon(event, now) ? <Text style={styles.clusterSoon}>Soon</Text> : null}
           </Pressable>
         ))}
         <Pressable
@@ -424,6 +454,7 @@ function EventList({
   onFilterChange,
   dayKey,
   freeWindow,
+  now: listNow,
   onFreeWindow,
 }: {
   title: string;
@@ -438,11 +469,12 @@ function EventList({
   onFilterChange?: (filter: EventFilter) => void;
   dayKey?: string;
   freeWindow?: FreeWindow | null;
+  now?: Date;
   onFreeWindow?: (value: FreeWindow | null) => void;
 }) {
   const [now, setNow] = useState(() => new Date());
+  const clock = listNow ?? now;
   const [wasVisible, setWasVisible] = useState(visible);
-  const hasFilter = Boolean(filter);
 
   // Refresh the clock in the same render that opens the list, so the first frame never filters
   // against the time the list was last open.
@@ -453,17 +485,17 @@ function EventList({
     }
   }
 
-  // Time windows move with the clock, so re-check them while the list is open. Depends on whether
-  // there is a filter, not on the filter itself, so chip taps don't restart the timer.
+  // Time windows and Starting soon move with the clock, so re-check them while the list is open.
+  // Depends on visibility, not the filter, so chip taps don't restart the timer.
   useEffect(() => {
-    if (!visible || !hasFilter) {
+    if (!visible || listNow) {
       return;
     }
     const timer = setInterval(() => setNow(new Date()), 30_000);
     return () => clearInterval(timer);
-  }, [visible, hasFilter]);
+  }, [visible, listNow]);
 
-  const shown = filter ? applyFilter(events, filter, now) : events;
+  const shown = filter ? applyFilter(events, filter, clock) : events;
   const filtered = Boolean(filter && isFiltering(filter) && events.length > 0);
 
   // The dim fades in place while the sheet slides up, as in Figma 04/05. With Reduce Motion, both only fade.
@@ -539,13 +571,14 @@ function EventList({
               <Text style={styles.rowMeta}>No events in this view</Text>
             )}
             renderItem={({ item }) => {
+              const soon = showsStartingSoon(item, clock);
               const content = (
                 <>
                   <HostAvatar host={item.host} size={32} />
                   <View style={styles.rowText}>
                     <Text style={styles.rowTitle}>{item.title}</Text>
                     <Text style={styles.rowMeta}>
-                      {`${item.startingSoon ? 'Starting soon · ' : ''}${item.visibility === 'link_only' ? `Link only · ${item.host.displayName}` : item.host.displayName}`}
+                      {`${soon ? 'Starting soon · ' : ''}${item.visibility === 'link_only' ? `Link only · ${item.host.displayName}` : item.host.displayName}`}
                     </Text>
                   </View>
                 </>
@@ -556,7 +589,7 @@ function EventList({
               return (
                 <Pressable
                   accessibilityHint="Opens event details"
-                  accessibilityLabel={`${item.startingSoon ? 'Starting soon. ' : ''}${item.visibility === 'link_only' ? 'Link only. ' : ''}${item.title}, hosted by ${item.host.displayName}`}
+                  accessibilityLabel={`${soon ? 'Starting soon. ' : ''}${item.visibility === 'link_only' ? 'Link only. ' : ''}${item.title}, hosted by ${item.host.displayName}`}
                   accessibilityRole="button"
                   onPress={() => onOpen(item.id, item.shareToken ?? undefined)}
                   style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
@@ -658,7 +691,14 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
   },
   clusterAvatar: {
+    alignItems: 'center',
     marginRight: -8,
+  },
+  clusterSoon: {
+    color: colors.ink,
+    fontFamily: fonts.displayBold,
+    fontSize: 9,
+    marginTop: 1,
   },
   dotsBubble: {
     alignItems: 'center',
