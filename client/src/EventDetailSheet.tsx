@@ -7,6 +7,7 @@ import {
   Share,
   StyleSheet,
   Text,
+  TextInput,
   View,
   useWindowDimensions,
 } from 'react-native';
@@ -26,7 +27,9 @@ import PeopleIcon from '../assets/detail/people.svg';
 import PlaceIcon from '../assets/detail/place.svg';
 import CloseIcon from '../assets/create/close.svg';
 import { categoryLabel } from './categories';
+import { loadAnnouncements, postAnnouncement, type Announcement } from './announcements';
 import { loadEventDetail, setAttendance, type EventDetail } from './eventDetail';
+import { chooseReminder, clearReminder, loadReminder, type LeadMinutes } from './reminders';
 import { eventShareLink } from './events';
 import HostAvatar from './HostAvatar';
 // Reanimated's withTiming needs the worklet easing, not core Animated's easeOut.
@@ -91,6 +94,9 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose }:
         setState(result.ok
           ? { status: 'loaded', event: result.event }
           : { status: 'failed', message: result.message, retry: result.retry });
+        if (result.ok && (result.event.status === 'cancelled' || !result.event.joined)) {
+          void clearReminder(sessionId, eventId, token);
+        }
       })
       .catch(() => {
         if (!cancelled) {
@@ -147,6 +153,9 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose }:
     }
     setPending(false);
     setPendingAction(null);
+    if (outcome.ok && !joining) {
+      void clearReminder(sessionId, eventId, token);
+    }
     if (refreshed?.ok) {
       setNeedsRefresh(false);
       setState({ status: 'loaded', event: refreshed.event });
@@ -249,6 +258,8 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose }:
           onRetry={needsRefresh ? () => setAttempt((value) => value + 1) : undefined}
           pending={pending}
           pendingAction={pendingAction}
+          sessionId={sessionId}
+          token={token}
         />
       ) : state.status === 'loading' ? (
         <View accessibilityLabel="Loading event" style={styles.placeholder}>
@@ -303,6 +314,8 @@ function Details({
   actionError,
   onAttendance,
   onRetry,
+  sessionId,
+  token,
 }: {
   event: EventDetail;
   now: Date;
@@ -311,6 +324,8 @@ function Details({
   actionError: string | null;
   onAttendance: () => void;
   onRetry?: () => void;
+  sessionId: string;
+  token?: string | null;
 }) {
   const startsAt = new Date(event.startsAt);
   const cancelled = event.status === 'cancelled';
@@ -335,6 +350,10 @@ function Details({
           {cancelled ? (
             <View accessibilityLabel="This event was cancelled" style={styles.cancelledChip}>
               <Text style={styles.cancelledText}>Cancelled</Text>
+            </View>
+          ) : event.startingSoon ? (
+            <View accessibilityLabel="Starting soon" style={styles.soonChip}>
+              <Text style={styles.soonText}>Starting soon</Text>
             </View>
           ) : ended ? (
             <View accessibilityLabel="This event has ended" style={styles.endedChip}>
@@ -409,6 +428,10 @@ function Details({
           <Text style={styles.retryText}>Try again</Text>
         </Pressable>
       ) : null}
+      <Announcements event={event} sessionId={sessionId} token={token} />
+      {event.joined && event.status === 'active' && !ended ? (
+        <Reminder event={event} sessionId={sessionId} token={token} />
+      ) : null}
       {event.shareToken ? (
         <Pressable
           accessibilityLabel="Share link"
@@ -420,6 +443,164 @@ function Details({
         </Pressable>
       ) : null}
     </ScrollView>
+  );
+}
+
+function Announcements({
+  event,
+  sessionId,
+  token,
+}: {
+  event: EventDetail;
+  sessionId: string;
+  token?: string | null;
+}) {
+  const [items, setItems] = useState<Announcement[]>([]);
+  const [draft, setDraft] = useState('');
+  const [message, setMessage] = useState<string | null>(null);
+  const [posting, setPosting] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadAnnouncements(sessionId, event.id, token).then((result) => {
+      if (!cancelled && result.ok) {
+        setItems(result.announcements);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, event.id, token]);
+
+  async function post() {
+    if (posting) {
+      return;
+    }
+    setPosting(true);
+    setMessage(null);
+    const outcome = await postAnnouncement(sessionId, event.id, draft);
+    setPosting(false);
+    if (!outcome.ok) {
+      setMessage(outcome.message);
+      return;
+    }
+    setDraft('');
+    setItems((current) => [outcome.announcement, ...current]);
+  }
+
+  return (
+    <View style={styles.extra}>
+      <Text style={styles.extraTitle}>Announcements</Text>
+      {items.length === 0 ? <Text style={styles.rowMeta}>No announcements yet.</Text> : null}
+      {items.map((item) => (
+        <View key={item.id}>
+          <Text style={styles.extraBody}>{item.body}</Text>
+          <Text style={styles.rowMeta}>{new Date(item.createdAt).toLocaleString()}</Text>
+        </View>
+      ))}
+      {event.hosting && event.status === 'active' ? (
+        <>
+          <TextInput
+            accessibilityLabel="Announcement"
+            maxLength={280}
+            onChangeText={setDraft}
+            placeholder="Where to meet, or what to bring"
+            style={styles.input}
+            value={draft}
+          />
+          <Pressable
+            accessibilityLabel="Post announcement"
+            accessibilityRole="button"
+            disabled={posting}
+            onPress={() => void post()}
+            style={({ pressed }) => [styles.share, pressed && styles.pressed]}
+          >
+            <Text style={styles.shareText}>{posting ? 'Posting...' : 'Post announcement'}</Text>
+          </Pressable>
+        </>
+      ) : null}
+      {message ? (
+        <Text accessibilityRole="alert" style={styles.actionError}>{message}</Text>
+      ) : null}
+    </View>
+  );
+}
+
+function Reminder({
+  event,
+  sessionId,
+  token,
+}: {
+  event: EventDetail;
+  sessionId: string;
+  token?: string | null;
+}) {
+  const [lead, setLead] = useState<LeadMinutes | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadReminder(sessionId, event.id, token).then((value) => {
+      if (!cancelled) {
+        setLead(value);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, event.id, token]);
+
+  async function choose(next: LeadMinutes) {
+    setMessage(null);
+    const outcome = await chooseReminder(sessionId, event.id, event.title, event.startsAt, next, token);
+    if (!outcome.ok) {
+      setMessage(outcome.message);
+      return;
+    }
+    setLead(next);
+  }
+
+  return (
+    <View style={styles.extra}>
+      <Text style={styles.extraTitle}>Remind me</Text>
+      <View style={styles.reminderRow}>
+        <Pressable
+          accessibilityLabel="Remind me 1 hour before"
+          accessibilityRole="button"
+          accessibilityState={{ selected: lead === 60 }}
+          onPress={() => void choose(60)}
+          style={({ pressed }) => [styles.share, lead === 60 && styles.reminderSelected, pressed && styles.pressed]}
+        >
+          <Text style={styles.shareText}>1 hour before</Text>
+        </Pressable>
+        <Pressable
+          accessibilityLabel="Remind me 15 minutes before"
+          accessibilityRole="button"
+          accessibilityState={{ selected: lead === 15 }}
+          onPress={() => void choose(15)}
+          style={({ pressed }) => [styles.share, lead === 15 && styles.reminderSelected, pressed && styles.pressed]}
+        >
+          <Text style={styles.shareText}>15 minutes before</Text>
+        </Pressable>
+        {lead !== null ? (
+          <Pressable
+            accessibilityLabel="Don't remind me"
+            accessibilityRole="button"
+            onPress={() => {
+              void clearReminder(sessionId, event.id, token);
+              setLead(null);
+              setMessage(null);
+            }}
+            style={({ pressed }) => [styles.share, pressed && styles.pressed]}
+          >
+            <Text style={styles.shareText}>Don't remind me</Text>
+          </Pressable>
+        ) : null}
+      </View>
+      {message ? (
+        <Text accessibilityRole="alert" style={styles.actionError}>{message}</Text>
+      ) : null}
+    </View>
   );
 }
 
@@ -542,6 +723,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
+  soonChip: {
+    backgroundColor: colors.yellow,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  soonText: {
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: '600',
+  },
   endedText: {
     color: colors.muted,
     fontSize: 14,
@@ -649,6 +841,40 @@ const styles = StyleSheet.create({
     color: colors.redDeep,
     fontSize: 16,
     fontWeight: '600',
+  },
+  extra: {
+    gap: 8,
+    paddingTop: 16,
+  },
+  extraTitle: {
+    color: colors.ink,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  extraBody: {
+    color: colors.inkSoft,
+    fontSize: 15,
+    lineHeight: 20,
+  },
+  rowMeta: {
+    color: colors.muted,
+    fontSize: 13,
+  },
+  input: {
+    borderColor: colors.inputLine,
+    borderRadius: 12,
+    borderWidth: 1,
+    color: colors.ink,
+    fontSize: 16,
+    minHeight: 48,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  reminderRow: {
+    gap: 8,
+  },
+  reminderSelected: {
+    backgroundColor: colors.redTint,
   },
   pressed: {
     opacity: 0.85,

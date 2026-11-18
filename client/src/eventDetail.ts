@@ -13,6 +13,8 @@ export type EventDetail = {
   visibility: 'public' | 'link_only';
   shareToken?: string | null;
   joined: boolean;
+  hosting: boolean;
+  startingSoon: boolean;
   host: {
     displayName: string;
     avatarUrl: string | null;

@@ -19,6 +19,14 @@ export function campusDayRange(now: Date): { from: string; to: string } {
 
 // The date stepper owns the selected-day value. Keeping the map query contract as a
 // campus calendar-day key avoids converting a selected local day through the device zone.
+// A clock time on a campus calendar day, as UTC. Used for the free-window filter.
+export function campusDateTime(dayKey: string, hours: number, minutes: number): string {
+  const day = parseCalendarDay(dayKey);
+  const wall = new Date(Date.UTC(day.year, day.month - 1, day.day, hours, minutes, 0));
+  const offset = timeZoneOffsetMs(wall, CAMPUS);
+  return new Date(wall.getTime() - offset).toISOString();
+}
+
 export function campusDayRangeForKey(dayKey: string): { from: string; to: string } {
   const day = parseCalendarDay(dayKey);
   return campusDayRangeForCalendarDay(day);

@@ -15,6 +15,7 @@ import { StatusBar } from 'expo-status-bar';
 import { mapboxAccessToken, stevensCenter } from './config';
 import { campusDayKey, isCampusDayBefore } from './campusTime';
 import EventFilters from './EventFilters';
+import FreeWindowControl, { type FreeWindow } from './FreeWindow';
 import { applyFilter, isFiltering, noFilter, type EventFilter } from './listFilters';
 import { groupBySpot, loadMapEvents, type MapEvent, type Spot } from './mapEvents';
 import PointerWhite from '../assets/signin/pin-pointer-white.svg';
@@ -121,6 +122,7 @@ export default function CampusMap({
   const [viewList, setViewList] = useState(false);
   // Lives here because the map stays mounted: kept while the app is open, not across restarts.
   const [listFilter, setListFilter] = useState<EventFilter>(noFilter);
+  const [freeWindow, setFreeWindow] = useState<FreeWindow | null>(null);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadedDay = useRef<string | null>(null);
 
@@ -155,9 +157,7 @@ export default function CampusMap({
       setEvents([]);
     }
     setLoadError(false);
-    setShowAll(null);
-    setViewList(false);
-    void loadMapEvents(sessionId, bbox, day, controller.signal)
+    void loadMapEvents(sessionId, bbox, day, freeWindow, controller.signal)
       .then((result) => {
         if (cancelled) {
           return;
@@ -177,7 +177,12 @@ export default function CampusMap({
       cancelled = true;
       controller.abort();
     };
-  }, [bbox, day, refreshKey, sessionId]);
+  }, [bbox, day, freeWindow, refreshKey, sessionId]);
+
+  useEffect(() => {
+    setShowAll(null);
+    setViewList(false);
+  }, [bbox, day, sessionId]);
 
   function scheduleQuery(
     event: { properties: { bounds: { ne: readonly number[]; sw: readonly number[] } } },
@@ -290,9 +295,12 @@ export default function CampusMap({
       />
       <EventList
         closeLabel="Close events in this view"
+        dayKey={day}
         events={events}
         filter={listFilter}
+        freeWindow={freeWindow}
         onClose={() => setViewList(false)}
+        onFreeWindow={setFreeWindow}
         onFilterChange={setListFilter}
         onOpen={onOpenEvent && ((id, token) => {
           setViewList(false);
@@ -317,7 +325,8 @@ function hasStarted(event: MapEvent, now: Date): boolean {
 function pinLabel(event: MapEvent, now: Date, past: boolean): string {
   const when = hasStarted(event, now) ? `started at ${startTime(event)}` : `starts at ${startTime(event)}`;
   const linkOnly = event.visibility === 'link_only' ? 'Link only. ' : '';
-  return `${linkOnly}${event.title}, hosted by ${event.host.displayName}, ${past ? 'past event, ' : ''}${when}`;
+  const soon = event.startingSoon ? 'Starting soon. ' : '';
+  return `${linkOnly}${soon}${event.title}, hosted by ${event.host.displayName}, ${past ? 'past event, ' : ''}${when}`;
 }
 
 // Figma 03. One event: a time tag (host + start time, yellow "Now" once started). Several: up to
@@ -359,7 +368,9 @@ function SpotBubble({
           ]}
         >
           <HostAvatar host={event.host} size={24} style={linkOnly ? styles.linkOnlyRing : undefined} />
-          <Text style={styles.tagText}>{!past && started ? 'Now' : startTime(event)}</Text>
+          <Text style={styles.tagText}>
+            {!past && event.startingSoon ? 'Soon' : !past && started ? 'Now' : startTime(event)}
+          </Text>
         </Pressable>
         {!past && started ? <PointerYellow height={7} width={12} /> : <PointerWhite height={7} width={12} />}
       </View>
@@ -411,6 +422,9 @@ function EventList({
   onOpen,
   filter,
   onFilterChange,
+  dayKey,
+  freeWindow,
+  onFreeWindow,
 }: {
   title: string;
   events: MapEvent[];
@@ -422,6 +436,9 @@ function EventList({
   // Only the "Events in this view" list has filters.
   filter?: EventFilter;
   onFilterChange?: (filter: EventFilter) => void;
+  dayKey?: string;
+  freeWindow?: FreeWindow | null;
+  onFreeWindow?: (value: FreeWindow | null) => void;
 }) {
   const [now, setNow] = useState(() => new Date());
   const [wasVisible, setWasVisible] = useState(visible);
@@ -509,6 +526,9 @@ function EventList({
           {filter && onFilterChange ? (
             <EventFilters filter={filter} matching={shown.length} onChange={onFilterChange} total={events.length} />
           ) : null}
+          {dayKey && onFreeWindow ? (
+            <FreeWindowControl dayKey={dayKey} onChange={onFreeWindow} value={freeWindow ?? null} />
+          ) : null}
           <FlatList
             data={shown}
             keyExtractor={(event) => event.id}
@@ -525,7 +545,7 @@ function EventList({
                   <View style={styles.rowText}>
                     <Text style={styles.rowTitle}>{item.title}</Text>
                     <Text style={styles.rowMeta}>
-                      {item.visibility === 'link_only' ? `Link only · ${item.host.displayName}` : item.host.displayName}
+                      {`${item.startingSoon ? 'Starting soon · ' : ''}${item.visibility === 'link_only' ? `Link only · ${item.host.displayName}` : item.host.displayName}`}
                     </Text>
                   </View>
                 </>
@@ -536,7 +556,7 @@ function EventList({
               return (
                 <Pressable
                   accessibilityHint="Opens event details"
-                  accessibilityLabel={`${item.visibility === 'link_only' ? 'Link only. ' : ''}${item.title}, hosted by ${item.host.displayName}`}
+                  accessibilityLabel={`${item.startingSoon ? 'Starting soon. ' : ''}${item.visibility === 'link_only' ? 'Link only. ' : ''}${item.title}, hosted by ${item.host.displayName}`}
                   accessibilityRole="button"
                   onPress={() => onOpen(item.id, item.shareToken ?? undefined)}
                   style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
