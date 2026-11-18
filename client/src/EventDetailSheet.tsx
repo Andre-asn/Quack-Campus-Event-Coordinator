@@ -201,6 +201,29 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose, o
     setActionError(outcome.message);
   }
 
+  // A failed refresh keeps the event already on screen, so a successful cancel still shows Cancelled.
+  const refreshKeeping = useCallback(async (fallback: EventDetail) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15_000);
+    let refreshed: Awaited<ReturnType<typeof loadEventDetail>> | null = null;
+    try {
+      refreshed = await loadEventDetail(sessionId, eventId, controller.signal, token);
+    } catch {
+      refreshed = null;
+    } finally {
+      clearTimeout(timer);
+    }
+    if (refreshed?.ok) {
+      setNeedsRefresh(false);
+      setActionError(null);
+      setState({ status: 'loaded', event: refreshed.event });
+      return;
+    }
+    setState({ status: 'loaded', event: fallback });
+    setNeedsRefresh(true);
+    setActionError('Couldn’t refresh this event. Try again.');
+  }, [sessionId, eventId, token]);
+
   // Keeps "Starts in 25 min" honest while the sheet stays open.
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 30_000);
@@ -282,7 +305,19 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose, o
           event={state.event}
           now={now}
           onAttendance={() => void changeAttendance(state.event)}
-          onRetry={needsRefresh ? () => setAttempt((value) => value + 1) : undefined}
+          onCancelled={(event) => {
+            const cancelledEvent: EventDetail = { ...event, status: 'cancelled' };
+            setState({ status: 'loaded', event: cancelledEvent });
+            setNeedsRefresh(false);
+            setActionError(null);
+            onChanged?.();
+            void refreshKeeping(cancelledEvent);
+          }}
+          onRetry={needsRefresh && state.status === 'loaded'
+            ? () => void refreshKeeping(state.event)
+            : needsRefresh
+              ? () => setAttempt((value) => value + 1)
+              : undefined}
           onSaved={() => {
             setAttempt((value) => value + 1);
             onChanged?.();
@@ -346,6 +381,7 @@ function Details({
   onRetry,
   sessionId,
   onSaved,
+  onCancelled,
 }: {
   event: EventDetail;
   now: Date;
@@ -356,6 +392,7 @@ function Details({
   onRetry?: () => void;
   sessionId: string;
   onSaved: () => void;
+  onCancelled: (event: EventDetail) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(event.title);
@@ -445,8 +482,13 @@ function Details({
       setEditError(outcome.message);
       return;
     }
-    onSaved();
+    onCancelled(event);
   }
+
+  const storedStart = new Date(event.startsAt);
+  const shownStart = startsAtDraft ?? storedStart;
+  // The iOS picker cannot show a past time, so an unchanged start stays as text until the host changes it.
+  const iosClampsStart = Platform.OS === 'ios' && shownStart.getTime() < Date.now();
 
   return (
     <ScrollView bounces={false} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
@@ -526,9 +568,20 @@ function Details({
           {fieldErrors.category ? <Text style={styles.fieldError}>{fieldErrors.category}</Text> : null}
 
           <Text style={styles.fieldLabel}>When</Text>
-          {Platform.OS === 'ios' ? (
+          {iosClampsStart ? (
+            <Pressable
+              accessibilityHint="Opens a date and time picker. The current start is kept until you choose a new one."
+              accessibilityLabel={`When: ${formatWhen(shownStart, now)}`}
+              accessibilityRole="button"
+              disabled={saving}
+              onPress={() => setStartsAtDraft(clampStart(shownStart))}
+              style={({ pressed }) => [styles.input, pressed && styles.pressed]}
+            >
+              <Text style={styles.inputText}>{formatWhen(shownStart, now)}</Text>
+            </Pressable>
+          ) : Platform.OS === 'ios' ? (
             <DateTimePicker
-              accessibilityLabel={`When: ${formatWhen(startsAt, now)}`}
+              accessibilityLabel={`When: ${formatWhen(shownStart, now)}`}
               disabled={saving}
               display="compact"
               maximumDate={new Date(Date.now() + MAX_AHEAD_MS)}
@@ -539,7 +592,7 @@ function Details({
                   setStartsAtDraft(clampStart(date));
                 }
               }}
-              value={clampStart(startsAt)}
+              value={clampStart(shownStart)}
             />
           ) : (
             <Pressable
