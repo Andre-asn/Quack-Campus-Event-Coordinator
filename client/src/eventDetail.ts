@@ -11,7 +11,7 @@ export type EventDetail = {
   latitude: number;
   longitude: number;
   startsAt: string;
-  endsAt: string;
+  endsAt: string | null;
   status: 'active' | 'cancelled';
   visibility: 'public' | 'link_only';
   shareToken?: string | null;
