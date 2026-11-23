@@ -95,11 +95,7 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose }:
           ? { status: 'loaded', event: result.event }
           : { status: 'failed', message: result.message, retry: result.retry });
         if (result.ok && (result.event.status === 'cancelled' || !result.event.joined)) {
-          void clearReminder(sessionId, eventId, token).then((cleared) => {
-            if (!cleared) {
-              void cancelLocalReminder(eventId);
-            }
-          });
+          void cancelLocalReminder(eventId);
         }
       })
       .catch(() => {

@@ -80,17 +80,7 @@ export async function chooseReminder(
     }
     const fireAt = new Date(new Date(startsAt).getTime() - leadMinutes * 60_000);
     try {
-      await Notifications.scheduleNotificationAsync({
-        identifier: reminderId(eventId),
-        content: {
-          title,
-          body: leadMinutes === 15 ? 'Starts in 15 minutes' : 'Starts in 1 hour',
-        },
-        trigger: {
-          type: Notifications.SchedulableTriggerInputTypes.DATE,
-          date: fireAt,
-        },
-      });
+      await scheduleReminder(eventId, title, startsAt, leadMinutes, fireAt, token);
     } catch {
       await clearReminder(sessionId, eventId, token);
       return { ok: false, message: 'Couldn’t schedule the reminder.' };
@@ -121,4 +111,145 @@ export async function clearReminder(
   }
   await cancelLocalReminder(eventId);
   return true;
+}
+
+// The server row is gone after a cancel or a leave, but the notification already sits on the device.
+// Launch and foreground compare it with the event's current start time and drop or move it.
+export async function syncReminders(sessionId: string): Promise<void> {
+  let scheduled: Notifications.NotificationRequest[];
+  try {
+    scheduled = await Notifications.getAllScheduledNotificationsAsync();
+  } catch {
+    return;
+  }
+  await Promise.all(scheduled.map((request) => syncOne(sessionId, request)));
+}
+
+async function syncOne(sessionId: string, request: Notifications.NotificationRequest): Promise<void> {
+  if (!request.identifier.startsWith('quack-reminder-')) {
+    return;
+  }
+  const data = request.content.data ?? {};
+  const eventId = typeof data.eventId === 'string'
+    ? data.eventId
+    : request.identifier.slice('quack-reminder-'.length);
+  const token = typeof data.token === 'string' ? data.token : null;
+  const savedStart = typeof data.startsAt === 'string' ? data.startsAt : null;
+  const event = await fetchEvent(sessionId, eventId, token);
+  if (event === 'unavailable') {
+    await cancelLocalReminder(eventId);
+    return;
+  }
+  if (event === 'unknown') {
+    return;
+  }
+  const lead = await fetchLead(sessionId, eventId, token);
+  if (lead === 'unknown') {
+    return;
+  }
+  if (event.status === 'cancelled' || !event.joined || lead === null) {
+    await cancelLocalReminder(eventId);
+    return;
+  }
+  if (savedStart === event.startsAt) {
+    return;
+  }
+  const fireAt = new Date(new Date(event.startsAt).getTime() - lead * 60_000);
+  if (fireAt.getTime() <= Date.now()) {
+    await cancelLocalReminder(eventId);
+    return;
+  }
+  try {
+    await scheduleReminder(eventId, event.title, event.startsAt, lead, fireAt, token);
+  } catch {
+    // Keep the notification that is already scheduled.
+  }
+}
+
+async function scheduleReminder(
+  eventId: string,
+  title: string,
+  startsAt: string,
+  leadMinutes: LeadMinutes,
+  fireAt: Date,
+  token?: string | null,
+): Promise<void> {
+  await Notifications.scheduleNotificationAsync({
+    identifier: reminderId(eventId),
+    content: {
+      title,
+      body: leadMinutes === 15 ? 'Starts in 15 minutes' : 'Starts in 1 hour',
+      data: {
+        eventId,
+        startsAt,
+        leadMinutes,
+        ...(token ? { token } : {}),
+      },
+    },
+    trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.DATE,
+      date: fireAt,
+    },
+  });
+}
+
+type SyncedEvent = {
+  title: string;
+  startsAt: string;
+  status: string;
+  joined: boolean;
+};
+
+async function fetchEvent(
+  sessionId: string,
+  eventId: string,
+  token: string | null,
+): Promise<SyncedEvent | 'unavailable' | 'unknown'> {
+  const query = token ? `?token=${encodeURIComponent(token)}` : '';
+  try {
+    const response = await fetch(
+      `${apiBaseUrl}/api/v1/events/${encodeURIComponent(eventId)}${query}`,
+      {
+        credentials: 'omit',
+        headers: { Accept: 'application/json', Cookie: `${sessionCookieName}=${sessionId}` },
+      },
+    );
+    if (response.status === 404) {
+      return 'unavailable';
+    }
+    if (!response.ok) {
+      return 'unknown';
+    }
+    const body = (await response.json()) as Partial<SyncedEvent>;
+    if (!body.startsAt || !body.title || !body.status || typeof body.joined !== 'boolean') {
+      return 'unknown';
+    }
+    return { title: body.title, startsAt: body.startsAt, status: body.status, joined: body.joined };
+  } catch {
+    return 'unknown';
+  }
+}
+
+async function fetchLead(
+  sessionId: string,
+  eventId: string,
+  token: string | null,
+): Promise<LeadMinutes | null | 'unknown'> {
+  const query = token ? `?token=${encodeURIComponent(token)}` : '';
+  try {
+    const response = await fetch(
+      `${apiBaseUrl}/api/v1/events/${encodeURIComponent(eventId)}/reminder${query}`,
+      {
+        credentials: 'omit',
+        headers: { Accept: 'application/json', Cookie: `${sessionCookieName}=${sessionId}` },
+      },
+    );
+    if (!response.ok) {
+      return 'unknown';
+    }
+    const body = (await response.json()) as { leadMinutes?: number | null };
+    return body.leadMinutes === 15 || body.leadMinutes === 60 ? body.leadMinutes : null;
+  } catch {
+    return 'unknown';
+  }
 }
