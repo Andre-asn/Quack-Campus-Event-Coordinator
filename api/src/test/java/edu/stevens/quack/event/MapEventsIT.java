@@ -205,6 +205,37 @@ class MapEventsIT extends PostgresIntegrationTest {
     }
 
     @Test
+    void acceptsTheInclusiveWindowEdgesButRejectsTheExclusiveOutsideEdges() {
+        User host = host("ada");
+        String session = sessionFor(host);
+        Instant yesterday = LocalDate.now(CAMPUS).minusDays(1).atStartOfDay(CAMPUS).toInstant();
+        Instant dayAfterTomorrow = LocalDate.now(CAMPUS).plusDays(2).atStartOfDay(CAMPUS).toInstant();
+
+        client.get().uri(mapUri(BBOX, yesterday, yesterday.plus(1, ChronoUnit.HOURS), 50, null))
+                .header(HttpHeaders.COOKIE, "JSESSIONID=" + session)
+                .exchange()
+                .expectStatus().isOk();
+        client.get().uri(mapUri(BBOX, dayAfterTomorrow.minus(1, ChronoUnit.HOURS), dayAfterTomorrow, 50, null))
+                .header(HttpHeaders.COOKIE, "JSESSIONID=" + session)
+                .exchange()
+                .expectStatus().isOk();
+
+        assertDateOutOfRange(host, dayAfterTomorrow, dayAfterTomorrow.plus(1, ChronoUnit.HOURS));
+        assertDateOutOfRange(host, yesterday.minus(1, ChronoUnit.SECONDS), yesterday.plus(1, ChronoUnit.HOURS));
+        assertDateOutOfRange(host, startOfToday(), dayAfterTomorrow.plus(1, ChronoUnit.SECONDS));
+    }
+
+    private void assertDateOutOfRange(User host, Instant from, Instant to) {
+        client.get().uri(mapUri(BBOX, from, to, 50, null))
+                .header(HttpHeaders.COOKIE, "JSESSIONID=" + sessionFor(host))
+                .exchange()
+                .expectStatus().isEqualTo(422)
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                .expectBody()
+                .jsonPath("$.code").isEqualTo("DATE_OUT_OF_RANGE");
+    }
+
+    @Test
     void pagesWithACursorInsteadOfABareArray() {
         User host = host("ada");
         Instant today = noonToday();

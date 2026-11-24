@@ -59,6 +59,7 @@ type Props = {
   onOpenEvent?: (eventId: string, token?: string) => void;
   // Supplied by the date stepper; omitted until the stepper is mounted by its parent.
   selectedDay?: string;
+  onSelectedDayChange?: (day: string) => void;
   // The signed-in user, for the top bar. Absent hides the bar (while a sheet covers the map).
   account?: Account;
 };
@@ -100,6 +101,7 @@ export default function CampusMap({
   onOpenEvent,
   account,
   selectedDay,
+  onSelectedDayChange,
 }: Props) {
   const insets = useSafeAreaInsets();
   const mapRef = useRef<MapView>(null);
@@ -204,7 +206,7 @@ export default function CampusMap({
             ? 'No Mapbox token is configured. Set EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN to a public pk. token in client/.env, then restart the bundler.'
             : 'The map could not load. Check your connection and reopen Quack!.'}
         />
-        {account ? <TopBar account={account} count={null} onOpenList={() => {}} unavailable /> : null}
+        {account ? <TopBar account={account} count={null} onOpenList={() => {}} onSelectedDayChange={onSelectedDayChange ?? (() => {})} selectedDay={day} unavailable /> : null}
       </>
     );
   }
@@ -275,7 +277,7 @@ export default function CampusMap({
         </View>
       ) : null}
       {account ? (
-        <TopBar account={account} count={loaded ? events.length : null} onOpenList={() => setViewList(true)} />
+        <TopBar account={account} count={loaded ? events.length : null} onOpenList={() => setViewList(true)} onSelectedDayChange={onSelectedDayChange ?? (() => {})} selectedDay={day} />
       ) : null}
       <EventList
         closeLabel="Close show all"

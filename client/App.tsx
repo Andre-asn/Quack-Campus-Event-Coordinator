@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { AppState } from 'react-native';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import * as Linking from 'expo-linking';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -20,6 +21,7 @@ import { restoreSession, signInWithGoogle, signOut } from './src/auth';
 import { eventFromLink } from './src/events';
 import type { StoredSession } from './src/sessionStore';
 import { colors } from './src/theme';
+import { campusDayKey, clampCampusDay } from './src/campusTime';
 
 type Screen =
   | { status: 'loading' }
@@ -45,12 +47,33 @@ function QuackApp() {
   const [mapRefresh, setMapRefresh] = useState(0);
   const [openEventId, setOpenEventId] = useState<string | null>(null);
   const [openToken, setOpenToken] = useState<string | null>(null);
+  const [selectedDay, setSelectedDay] = useState(() => campusDayKey(new Date()));
   const [pendingLink, setPendingLink] = useState<{ id: string; token: string } | null>(null);
   const [fontsLoaded, fontError] = useFonts({
     BricolageGrotesque_600SemiBold,
     BricolageGrotesque_700Bold,
     BricolageGrotesque_800ExtraBold,
   });
+
+  useEffect(() => {
+    const reanchor = () => {
+      const now = new Date();
+      setSelectedDay((day) => clampCampusDay(day, now));
+    };
+    reanchor();
+    const timer = setInterval(reanchor, 30_000);
+    let previous = AppState.currentState;
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (previous !== 'active' && state === 'active') {
+        reanchor();
+      }
+      previous = state;
+    });
+    return () => {
+      clearInterval(timer);
+      subscription.remove();
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -163,6 +186,8 @@ function QuackApp() {
           onPinMoved={creating ? setPinned : undefined}
           refreshKey={mapRefresh}
           sessionId={screen.session.sessionId}
+          selectedDay={selectedDay}
+          onSelectedDayChange={(day) => setSelectedDay(clampCampusDay(day, new Date()))}
           // The top bar hides while a sheet covers the map.
           account={creating || openEventId !== null ? undefined : {
             user: screen.session.user,
