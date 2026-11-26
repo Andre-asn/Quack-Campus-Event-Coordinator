@@ -30,9 +30,19 @@ import PeopleIcon from '../assets/detail/people.svg';
 import PlaceIcon from '../assets/detail/place.svg';
 import CloseIcon from '../assets/create/close.svg';
 import { categories, categoryLabel } from './categories';
+import { loadAnnouncements, postAnnouncement, type Announcement } from './announcements';
 import { openCalendarEditor } from './deviceCalendar';
 import { cancelEvent, loadEventDetail, setAttendance, updateEvent, type EventDetail } from './eventDetail';
+import {
+  cancelLocalReminder,
+  chooseReminder,
+  clearReminder,
+  loadReminder,
+  syncReminders,
+  type LeadMinutes,
+} from './reminders';
 import { eventShareLink, type FieldErrors } from './events';
+import { shouldDropReminderAfterUnmount } from './reminderClose';
 import HostAvatar from './HostAvatar';
 // Reanimated's withTiming needs the worklet easing, not core Animated's easeOut.
 import { colors, fonts, sheetEaseOut as easeOut } from './theme';
@@ -95,6 +105,10 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose, o
   const [pendingAction, setPendingAction] = useState<'join' | 'leave' | null>(null);
   const [needsRefresh, setNeedsRefresh] = useState(false);
   const attendanceRequest = useRef(0);
+  const pendingRef = useRef(false);
+  const stateRef = useRef<State>(state);
+  pendingRef.current = pending;
+  stateRef.current = state;
   const calendarOfferShown = useRef(false);
   const calendarActionStarted = useRef(false);
   const mounted = useRef(true);
@@ -162,7 +176,8 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose, o
   useEffect(() => {
     const controller = new AbortController();
     let cancelled = false;
-    attendanceRequest.current += 1;
+    const requestId = attendanceRequest.current + 1;
+    attendanceRequest.current = requestId;
     setState({ status: 'loading' });
     setPending(false);
     setPendingAction(null);
@@ -170,15 +185,18 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose, o
     setActionError(null);
     loadEventDetail(sessionId, eventId, controller.signal, token)
       .then((result) => {
-        if (cancelled) {
+        if (cancelled || requestId !== attendanceRequest.current) {
           return;
         }
         setState(result.ok
           ? { status: 'loaded', event: result.event }
           : { status: 'failed', message: result.message, retry: result.retry });
+        if (result.ok && (result.event.status === 'cancelled' || !result.event.joined)) {
+          void cancelLocalReminder(eventId);
+        }
       })
       .catch(() => {
-        if (!cancelled) {
+        if (!cancelled && requestId === attendanceRequest.current) {
           setState({ status: 'failed', message: 'Couldn’t reach Quack!. Check your connection.', retry: true });
         }
       });
@@ -232,6 +250,12 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose, o
     }
     setPending(false);
     setPendingAction(null);
+    if (outcome.ok && !joining) {
+      const cleared = await clearReminder(sessionId, eventId, token);
+      if (!cleared) {
+        await cancelLocalReminder(eventId);
+      }
+    }
     if (refreshed?.ok) {
       setNeedsRefresh(false);
       setState({ status: 'loaded', event: refreshed.event });
@@ -263,8 +287,37 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose, o
     setActionError(outcome.message);
   }
 
+  const refreshOpenEvent = useCallback(async () => {
+    if (pendingRef.current || stateRef.current.status !== 'loaded') {
+      return;
+    }
+    const seen = attendanceRequest.current;
+    const previous = stateRef.current.event;
+    let result: Awaited<ReturnType<typeof loadEventDetail>>;
+    try {
+      result = await loadEventDetail(sessionId, eventId, undefined, token);
+    } catch {
+      return;
+    }
+    if (!mounted.current || pendingRef.current || seen !== attendanceRequest.current) {
+      return;
+    }
+    if (!result.ok) {
+      return;
+    }
+    setState({ status: 'loaded', event: result.event });
+    if (result.event.status === 'cancelled' || !result.event.joined) {
+      await cancelLocalReminder(eventId);
+      return;
+    }
+    if (previous.startsAt !== result.event.startsAt || previous.status !== result.event.status) {
+      await syncReminders(sessionId);
+    }
+  }, [sessionId, eventId, token]);
+
   // A failed refresh keeps the event already on screen, so a successful cancel still shows Cancelled.
   const refreshKeeping = useCallback(async (fallback: EventDetail) => {
+    const seen = attendanceRequest.current;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 15_000);
     let refreshed: Awaited<ReturnType<typeof loadEventDetail>> | null = null;
@@ -275,22 +328,49 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose, o
     } finally {
       clearTimeout(timer);
     }
+    if (!mounted.current || seen !== attendanceRequest.current) {
+      return;
+    }
+    const event = refreshed?.ok ? refreshed.event : fallback;
     if (refreshed?.ok) {
       setNeedsRefresh(false);
       setActionError(null);
-      setState({ status: 'loaded', event: refreshed.event });
-      return;
+    } else {
+      setNeedsRefresh(true);
+      setActionError('Couldn’t refresh this event. Try again.');
     }
-    setState({ status: 'loaded', event: fallback });
-    setNeedsRefresh(true);
-    setActionError('Couldn’t refresh this event. Try again.');
+    setState({ status: 'loaded', event });
+    if (event.status === 'cancelled' || !event.joined) {
+      await cancelLocalReminder(eventId);
+    }
   }, [sessionId, eventId, token]);
 
-  // Keeps "Starts in 25 min" honest while the sheet stays open.
+  // Keeps the relative time, the starting-soon marker, and a cancel or new start time current.
+  const openStart = state.status === 'loaded' ? state.event.startsAt : null;
+  const openStatus = state.status === 'loaded' ? state.event.status : null;
   useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 30_000);
+    const timer = setInterval(() => {
+      setNow(new Date());
+      void refreshOpenEvent();
+    }, 30_000);
     return () => clearInterval(timer);
-  }, []);
+  }, [refreshOpenEvent]);
+
+  useEffect(() => {
+    if (openStart === null || openStatus !== 'active') {
+      return;
+    }
+    const start = new Date(openStart).getTime();
+    const marks = [start - 3_600_000, start].filter((time) => time > Date.now());
+    if (marks.length === 0) {
+      return;
+    }
+    const delay = Math.min(...marks) - Date.now() + 250;
+    const timer = setTimeout(() => {
+      void refreshOpenEvent();
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [openStart, openStatus, refreshOpenEvent]);
 
   // Exit is quicker than entry.
   const close = useCallback(() => {
@@ -369,6 +449,7 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose, o
           onAttendance={() => void changeAttendance(state.event)}
           onCancelled={(event) => {
             const cancelledEvent: EventDetail = { ...event, status: 'cancelled' };
+            attendanceRequest.current += 1;
             setState({ status: 'loaded', event: cancelledEvent });
             setNeedsRefresh(false);
             setActionError(null);
@@ -387,6 +468,8 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose, o
           pending={pending}
           pendingAction={pendingAction}
           sessionId={sessionId}
+          sheetMounted={mounted}
+          token={token}
         />
       ) : state.status === 'loading' ? (
         <View accessibilityLabel="Loading event" style={styles.placeholder}>
@@ -442,6 +525,8 @@ function Details({
   onAttendance,
   onRetry,
   sessionId,
+  token,
+  sheetMounted,
   onSaved,
   onCancelled,
 }: {
@@ -453,6 +538,8 @@ function Details({
   onAttendance: () => void;
   onRetry?: () => void;
   sessionId: string;
+  token?: string | null;
+  sheetMounted: { current: boolean };
   onSaved: () => void;
   onCancelled: (event: EventDetail) => void;
 }) {
@@ -564,6 +651,10 @@ function Details({
           {cancelled ? (
             <View accessibilityLabel="This event was cancelled" style={styles.cancelledChip}>
               <Text style={styles.cancelledText}>Cancelled</Text>
+            </View>
+          ) : event.startingSoon && startsAt.getTime() > now.getTime() ? (
+            <View accessibilityLabel="Starting soon" style={styles.soonChip}>
+              <Text style={styles.soonText}>Starting soon</Text>
             </View>
           ) : ended ? (
             <View accessibilityLabel="This event has ended" style={styles.endedChip}>
@@ -801,6 +892,10 @@ function Details({
               <Text style={styles.shareText}>{saving ? 'Cancelling...' : 'Cancel event'}</Text>
             </Pressable>
           ) : null}
+          <Announcements event={event} sessionId={sessionId} token={token} />
+          {event.joined && event.status === 'active' && !ended ? (
+            <Reminder event={event} sessionId={sessionId} sheetMounted={sheetMounted} token={token} />
+          ) : null}
           {event.shareToken ? (
             <Pressable
               accessibilityLabel="Share link"
@@ -814,6 +909,222 @@ function Details({
         </>
       )}
     </ScrollView>
+  );
+}
+
+function Announcements({
+  event,
+  sessionId,
+  token,
+}: {
+  event: EventDetail;
+  sessionId: string;
+  token?: string | null;
+}) {
+  const [items, setItems] = useState<Announcement[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
+  const [message, setMessage] = useState<string | null>(null);
+  const [posting, setPosting] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setItems(null);
+    setLoadError(null);
+    loadAnnouncements(sessionId, event.id, token).then((result) => {
+      if (cancelled) {
+        return;
+      }
+      if (result.ok) {
+        setItems(result.announcements);
+        return;
+      }
+      setItems([]);
+      setLoadError(result.message);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, event.id, token]);
+
+  async function post() {
+    if (posting) {
+      return;
+    }
+    setPosting(true);
+    setMessage(null);
+    const outcome = await postAnnouncement(sessionId, event.id, draft);
+    setPosting(false);
+    if (!outcome.ok) {
+      setMessage(outcome.message);
+      return;
+    }
+    setDraft('');
+    setItems((current) => [outcome.announcement, ...(current ?? [])]);
+  }
+
+  return (
+    <View style={styles.extra}>
+      <Text style={styles.extraTitle}>Announcements</Text>
+      {loadError ? (
+        <Text accessibilityRole="alert" style={styles.actionError}>{loadError}</Text>
+      ) : items === null ? (
+        <Text style={styles.rowMeta}>Loading announcements...</Text>
+      ) : items.length === 0 ? (
+        <Text style={styles.rowMeta}>No announcements yet.</Text>
+      ) : null}
+      {(items ?? []).map((item) => (
+        <View key={item.id}>
+          <Text style={styles.extraBody}>{item.body}</Text>
+          <Text style={styles.rowMeta}>{new Date(item.createdAt).toLocaleString()}</Text>
+        </View>
+      ))}
+      {event.hosting && event.status === 'active' ? (
+        <>
+          <TextInput
+            accessibilityLabel="Announcement"
+            maxLength={280}
+            onChangeText={(text) => {
+              setDraft(text);
+              setMessage(null);
+            }}
+            placeholder="Where to meet, or what to bring"
+            style={styles.input}
+            value={draft}
+          />
+          <Pressable
+            accessibilityLabel="Post announcement"
+            accessibilityRole="button"
+            disabled={posting}
+            onPress={() => void post()}
+            style={({ pressed }) => [styles.share, pressed && styles.pressed]}
+          >
+            <Text style={styles.shareText}>{posting ? 'Posting...' : 'Post announcement'}</Text>
+          </Pressable>
+        </>
+      ) : null}
+      {message ? (
+        <Text accessibilityRole="alert" style={styles.actionError}>{message}</Text>
+      ) : null}
+    </View>
+  );
+}
+
+function Reminder({
+  event,
+  sessionId,
+  sheetMounted,
+  token,
+}: {
+  event: EventDetail;
+  sessionId: string;
+  sheetMounted: { current: boolean };
+  token?: string | null;
+}) {
+  const [lead, setLead] = useState<LeadMinutes | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const generation = useRef(0);
+
+  useEffect(() => {
+    const current = ++generation.current;
+    setBusy(false);
+    loadReminder(sessionId, event.id, token).then((value) => {
+      if (current === generation.current) {
+        setLead(value);
+      }
+    });
+    return () => {
+      generation.current += 1;
+    };
+  }, [sessionId, event.id, token]);
+
+  async function choose(next: LeadMinutes) {
+    if (busy) {
+      return;
+    }
+    const current = generation.current;
+    setBusy(true);
+    setMessage(null);
+    const outcome = await chooseReminder(sessionId, event.id, event.title, event.startsAt, next, token);
+    if (current !== generation.current) {
+      if (outcome.ok && shouldDropReminderAfterUnmount(sheetMounted.current)) {
+        await cancelLocalReminder(event.id);
+      }
+      return;
+    }
+    setBusy(false);
+    if (!outcome.ok) {
+      setMessage(outcome.message);
+      const loaded = await loadReminder(sessionId, event.id, token);
+      if (current === generation.current) {
+        setLead(loaded);
+      }
+      return;
+    }
+    setLead(next);
+  }
+
+  async function turnOff() {
+    if (busy) {
+      return;
+    }
+    const current = generation.current;
+    setBusy(true);
+    setMessage(null);
+    const cleared = await clearReminder(sessionId, event.id, token);
+    if (current !== generation.current) {
+      return;
+    }
+    setBusy(false);
+    if (!cleared) {
+      setMessage('Couldn’t turn off the reminder. Try again.');
+      return;
+    }
+    setLead(null);
+  }
+
+  return (
+    <View style={styles.extra}>
+      <Text style={styles.extraTitle}>Remind me</Text>
+      <View style={styles.reminderRow}>
+        <Pressable
+          accessibilityLabel="Remind me 1 hour before"
+          accessibilityRole="button"
+          accessibilityState={{ disabled: busy, selected: lead === 60 }}
+          disabled={busy}
+          onPress={() => void choose(60)}
+          style={({ pressed }) => [styles.share, lead === 60 && styles.reminderSelected, pressed && styles.pressed]}
+        >
+          <Text style={styles.shareText}>1 hour before</Text>
+        </Pressable>
+        <Pressable
+          accessibilityLabel="Remind me 15 minutes before"
+          accessibilityRole="button"
+          accessibilityState={{ disabled: busy, selected: lead === 15 }}
+          disabled={busy}
+          onPress={() => void choose(15)}
+          style={({ pressed }) => [styles.share, lead === 15 && styles.reminderSelected, pressed && styles.pressed]}
+        >
+          <Text style={styles.shareText}>15 minutes before</Text>
+        </Pressable>
+        {lead !== null ? (
+          <Pressable
+            accessibilityLabel="Don't remind me"
+            accessibilityRole="button"
+            accessibilityState={{ disabled: busy }}
+            disabled={busy}
+            onPress={() => void turnOff()}
+            style={({ pressed }) => [styles.share, pressed && styles.pressed]}
+          >
+            <Text style={styles.shareText}>Don't remind me</Text>
+          </Pressable>
+        ) : null}
+      </View>
+      {message ? (
+        <Text accessibilityRole="alert" style={styles.actionError}>{message}</Text>
+      ) : null}
+    </View>
   );
 }
 
@@ -936,6 +1247,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
+  soonChip: {
+    backgroundColor: colors.yellow,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  soonText: {
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: '600',
+  },
   endedText: {
     color: colors.muted,
     fontSize: 14,
@@ -1050,6 +1372,24 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  extra: {
+    gap: 8,
+    paddingTop: 16,
+  },
+  extraTitle: {
+    color: colors.ink,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  extraBody: {
+    color: colors.inkSoft,
+    fontSize: 15,
+    lineHeight: 20,
+  },
+  rowMeta: {
+    color: colors.muted,
+    fontSize: 13,
+  },
   form: {
     gap: 8,
     paddingBottom: 12,
@@ -1070,6 +1410,12 @@ const styles = StyleSheet.create({
     minHeight: 48,
     paddingHorizontal: 14,
     paddingVertical: 12,
+  },
+  reminderRow: {
+    gap: 8,
+  },
+  reminderSelected: {
+    backgroundColor: colors.redTint,
   },
   inputText: {
     color: colors.ink,

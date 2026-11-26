@@ -44,6 +44,7 @@ public class EventService {
     private final UserRepository users;
     private final AttendanceRepository attendance;
     private final MapEventQuery mapEvents;
+    private final ReminderRepository reminders;
     private final CurrentUser currentUser;
     private final Clock clock;
     private final CampusProperties campus;
@@ -53,6 +54,7 @@ public class EventService {
             UserRepository users,
             AttendanceRepository attendance,
             MapEventQuery mapEvents,
+            ReminderRepository reminders,
             CurrentUser currentUser,
             Clock clock,
             CampusProperties campus) {
@@ -60,6 +62,7 @@ public class EventService {
         this.users = users;
         this.attendance = attendance;
         this.mapEvents = mapEvents;
+        this.reminders = reminders;
         this.currentUser = currentUser;
         this.clock = clock;
         this.campus = campus;
@@ -102,7 +105,7 @@ public class EventService {
     @Transactional
     public Event update(UUID id, EventController.EditEventRequest request) {
         User caller = currentUser.require();
-        Event event = events.findById(id).orElseThrow(EventService::missing);
+        Event event = events.findByIdForUpdate(id).orElseThrow(EventService::missing);
         if (!event.getHostId().equals(caller.getId())) {
             // A link-only event is invisible without its token, so a miss and a refusal look the same.
             if (LINK_ONLY.equals(event.getVisibility())) {
@@ -156,6 +159,56 @@ public class EventService {
         }
         // Postgres stores timestamp(6), so keep microseconds or the read-back value drifts.
         event.cancel(clock.instant().truncatedTo(ChronoUnit.MICROS));
+        reminders.deleteForEvent(event.getId());
+    }
+
+    // A link-only event stays hidden without its share token, including from its host.
+    public Event visibleEvent(String idText, String token) {
+        return requireVisible(idText, token, false);
+    }
+
+    // Writes take the row lock before checking visibility, so a cancel or a leave cannot commit in between.
+    public Event visibleEventForUpdate(String idText, String token) {
+        return requireVisible(idText, token, true);
+    }
+
+    // Posting is host-only. A link-only event still looks missing to everyone else.
+    public Event hostedEvent(String idText, UUID hostId) {
+        return requireHost(idText, hostId, false);
+    }
+
+    public Event hostedEventForUpdate(String idText, UUID hostId) {
+        return requireHost(idText, hostId, true);
+    }
+
+    private Event requireVisible(String idText, String token, boolean lock) {
+        currentUser.require();
+        UUID id = uuidOrNull(idText);
+        if (id == null) {
+            throw new EventNotFoundException();
+        }
+        Event event = (lock ? events.findByIdForUpdate(id) : events.findById(id))
+                .orElseThrow(EventNotFoundException::new);
+        if (LINK_ONLY.equals(event.getVisibility()) && !opens(event, token)) {
+            throw new EventNotFoundException();
+        }
+        return event;
+    }
+
+    private Event requireHost(String idText, UUID hostId, boolean lock) {
+        UUID id = uuidOrNull(idText);
+        if (id == null) {
+            throw new EventNotFoundException();
+        }
+        Event event = (lock ? events.findByIdForUpdate(id) : events.findById(id))
+                .orElseThrow(EventNotFoundException::new);
+        if (!event.getHostId().equals(hostId)) {
+            if (LINK_ONLY.equals(event.getVisibility())) {
+                throw new EventNotFoundException();
+            }
+            throw new EventStateException(HttpStatus.FORBIDDEN, "NOT_HOST", "Only the host can post on this event.");
+        }
+        return event;
     }
 
     private static String strip(String value) {
@@ -274,7 +327,12 @@ public class EventService {
         }
         User host = users.findById(event.getHostId()).orElseThrow(EventNotFoundException::new);
         // The share token goes back only to the host, so they can copy the link again.
-        UUID shareToken = viewer.getId().equals(event.getHostId()) ? event.getShareToken() : null;
+        boolean hosting = viewer.getId().equals(event.getHostId());
+        UUID shareToken = hosting ? event.getShareToken() : null;
+        Instant now = clock.instant();
+        boolean startingSoon = "active".equals(event.getStatus())
+                && event.getStartsAt().isAfter(now)
+                && !event.getStartsAt().isAfter(now.plus(1, ChronoUnit.HOURS));
         return new EventDetail(
                 event.getId(),
                 event.getTitle(),
@@ -291,7 +349,8 @@ public class EventService {
                 event.getVisibility(),
                 shareToken,
                 attendance.isAttending(event.getId(), viewer.getId()),
-                viewer.getId().equals(event.getHostId()));
+                hosting,
+                startingSoon);
     }
 
     private static boolean opens(Event event, String token) {
@@ -318,7 +377,14 @@ public class EventService {
     }
 
     @Transactional(readOnly = true)
-    public MapQueryResult map(String bbox, String fromText, String toText, String limitText, String cursor) {
+    public MapQueryResult map(
+            String bbox,
+            String fromText,
+            String toText,
+            String limitText,
+            String cursor,
+            String freeFromText,
+            String freeToText) {
         // Link-only events stay off every map except their host's. The check lives here, not in the client.
         User viewer = currentUser.require();
         double[] bounds = bounds(bbox);
@@ -334,6 +400,21 @@ public class EventService {
         if (from.isBefore(earliest) || !from.isBefore(latest) || to.isAfter(latest)) {
             throw new MapQueryException(HttpStatus.UNPROCESSABLE_CONTENT, "DATE_OUT_OF_RANGE",
                     "Map queries are limited to yesterday, today, and tomorrow.");
+        }
+        Instant freeFrom = null;
+        Instant freeTo = null;
+        boolean hasFreeFrom = freeFromText != null && !freeFromText.isBlank();
+        boolean hasFreeTo = freeToText != null && !freeToText.isBlank();
+        if (hasFreeFrom != hasFreeTo) {
+            throw malformed("freeFrom and freeTo are both required.");
+        }
+        if (hasFreeFrom) {
+            freeFrom = instant(freeFromText, "freeFrom");
+            freeTo = instant(freeToText, "freeTo");
+            if (!freeFrom.isBefore(freeTo)) {
+                throw new MapQueryException(HttpStatus.UNPROCESSABLE_CONTENT, "INVALID_RANGE",
+                        "freeFrom must be before freeTo.");
+            }
         }
         int limit = limit(limitText);
         Instant cursorStartsAt = null;
@@ -351,7 +432,8 @@ public class EventService {
             }
         }
         List<MapEventPage.MapPin> rows = mapEvents.find(
-                bounds[0], bounds[1], bounds[2], bounds[3], from, to, cursorStartsAt, cursorId, viewer.getId(), limit + 1);
+                bounds[0], bounds[1], bounds[2], bounds[3], from, to, cursorStartsAt, cursorId, viewer.getId(),
+                limit + 1, clock.instant(), freeFrom, freeTo);
         String nextCursor = null;
         if (rows.size() > limit) {
             MapEventPage.MapPin last = rows.get(limit - 1);
@@ -444,6 +526,7 @@ public class EventService {
                 field(digest, String.valueOf(pin.host().avatarUrl()));
                 field(digest, Double.toString(pin.latitude()));
                 field(digest, Double.toString(pin.longitude()));
+                field(digest, Boolean.toString(pin.startingSoon()));
             }
             field(digest, String.valueOf(page.nextCursor()));
             return HexFormat.of().formatHex(digest.digest());

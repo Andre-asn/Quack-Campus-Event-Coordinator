@@ -58,8 +58,10 @@ public class EventController {
             @RequestParam(required = false) String to,
             @RequestParam(required = false) String limit,
             @RequestParam(required = false) String cursor,
+            @RequestParam(required = false) String freeFrom,
+            @RequestParam(required = false) String freeTo,
             @RequestHeader(value = HttpHeaders.IF_NONE_MATCH, required = false) String ifNoneMatch) {
-        EventService.MapQueryResult result = events.map(bbox, from, to, limit, cursor);
+        EventService.MapQueryResult result = events.map(bbox, from, to, limit, cursor, freeFrom, freeTo);
         if (matches(ifNoneMatch, result.etag())) {
             return ResponseEntity.status(HttpStatus.NOT_MODIFIED).eTag(result.etag()).build();
         }

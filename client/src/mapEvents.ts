@@ -12,6 +12,7 @@ export type MapEvent = {
   attendeeCount: number;
   visibility: 'public' | 'link_only';
   shareToken?: string | null;
+  startingSoon: boolean;
   host: {
     displayName: string;
     avatarUrl: string | null;
@@ -54,6 +55,7 @@ export async function loadMapEvents(
   sessionId: string,
   bbox: string,
   selectedDay = campusDayKey(new Date()),
+  freeWindow?: { from: string; to: string } | null,
   signal?: AbortSignal,
 ): Promise<{ events: MapEvent[]; unchanged: boolean }> {
   const generation = ++loadGeneration;
@@ -63,7 +65,10 @@ export async function loadMapEvents(
   const { from, to } = selectedDay === campusDayKey(new Date())
     ? campusDayRange(new Date())
     : campusDayRangeForKey(selectedDay);
-  const url = `${apiBaseUrl.replace(/\/$/, '')}/api/v1/events?bbox=${encodeURIComponent(bbox)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=100`;
+  const free = freeWindow
+    ? `&freeFrom=${encodeURIComponent(freeWindow.from)}&freeTo=${encodeURIComponent(freeWindow.to)}`
+    : '';
+  const url = `${apiBaseUrl.replace(/\/$/, '')}/api/v1/events?bbox=${encodeURIComponent(bbox)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=100${free}`;
   const headers: Record<string, string> = {
     Accept: 'application/json',
     Cookie: `${sessionCookieName}=${sessionId}`,

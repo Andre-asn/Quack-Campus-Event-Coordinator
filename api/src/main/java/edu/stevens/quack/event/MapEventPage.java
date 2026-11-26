@@ -20,7 +20,8 @@ public record MapEventPage(List<MapPin> events, String nextCursor) {
             long attendeeCount,
             MapHost host,
             String visibility,
-            @JsonInclude(JsonInclude.Include.NON_NULL) UUID shareToken) {
+            @JsonInclude(JsonInclude.Include.NON_NULL) UUID shareToken,
+            boolean startingSoon) {
     }
 
     public record MapHost(String displayName, String avatarUrl) {

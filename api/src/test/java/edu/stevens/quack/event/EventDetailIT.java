@@ -112,7 +112,7 @@ class EventDetailIT extends PostgresIntegrationTest {
         Map<String, Object> json = JsonPath.read(body, "$");
         assertThat(json).containsOnlyKeys(
                 "id", "title", "description", "category", "locationLabel", "startsAt", "endsAt", "status", "host",
-                "attendeeCount", "visibility", "joined", "latitude", "longitude", "hosting");
+                "attendeeCount", "visibility", "joined", "latitude", "longitude", "hosting", "startingSoon");
         Map<String, Object> host = JsonPath.read(body, "$.host");
         assertThat(host).containsOnlyKeys("displayName", "avatarUrl");
     }

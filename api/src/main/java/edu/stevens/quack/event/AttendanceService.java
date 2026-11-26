@@ -19,16 +19,19 @@ public class AttendanceService {
 
     private final EventRepository events;
     private final AttendanceRepository attendance;
+    private final ReminderRepository reminders;
     private final CurrentUser currentUser;
     private final Clock clock;
 
     public AttendanceService(
             EventRepository events,
             AttendanceRepository attendance,
+            ReminderRepository reminders,
             CurrentUser currentUser,
             Clock clock) {
         this.events = events;
         this.attendance = attendance;
+        this.reminders = reminders;
         this.currentUser = currentUser;
         this.clock = clock;
     }
@@ -44,7 +47,7 @@ public class AttendanceService {
     public void join(UUID eventId, String token) {
         User user = currentUser.require();
 
-        Event event = events.findById(eventId)
+        Event event = events.findByIdForUpdate(eventId)
                 .orElseThrow(AttendanceService::notFound);
 
         if ("link_only".equals(event.getVisibility())
@@ -79,7 +82,7 @@ public class AttendanceService {
     public void leave(UUID eventId, String token) {
         User user = currentUser.require();
 
-        Event event = events.findById(eventId)
+        Event event = events.findByIdForUpdate(eventId)
                 .orElseThrow(AttendanceService::notFound);
 
         if ("link_only".equals(event.getVisibility())
@@ -95,6 +98,7 @@ public class AttendanceService {
         }
 
         attendance.leave(eventId, user.getId());
+        reminders.deleteForUser(eventId, user.getId());
     }
 
     /**

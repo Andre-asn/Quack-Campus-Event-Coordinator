@@ -23,7 +23,8 @@ public record EventDetail(
         String visibility,
         @JsonInclude(JsonInclude.Include.NON_NULL) UUID shareToken,
         boolean joined,
-        boolean hosting) {
+        boolean hosting,
+        boolean startingSoon) {
 
     public record Host(String displayName, String avatarUrl) {
     }

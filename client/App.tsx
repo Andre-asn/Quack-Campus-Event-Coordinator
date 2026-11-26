@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AppState } from 'react-native';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { AppState, Pressable, StyleSheet, Text, View } from 'react-native';
 import * as Linking from 'expo-linking';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,6 +17,7 @@ import EventDetailSheet from './src/EventDetailSheet';
 import LoadingScreen from './src/LoadingScreen';
 import SignInScreen, { type SignInError } from './src/SignInScreen';
 import { restoreSession, signInWithGoogle, signOut } from './src/auth';
+import { syncReminders } from './src/reminders';
 import { eventFromLink } from './src/events';
 import type { StoredSession } from './src/sessionStore';
 import { colors } from './src/theme';
@@ -150,6 +150,31 @@ function QuackApp() {
     const subscription = Linking.addEventListener('url', ({ url }) => take(url));
     return () => subscription.remove();
   }, []);
+
+  const sessionId = screen.status === 'signed-in' ? screen.session.sessionId : null;
+
+  // A cancel or a new start time only deletes the server row. Reconcile the device notification
+  // on launch, whenever the app returns, and while it stays open. A closed app cannot run this.
+  useEffect(() => {
+    if (!sessionId) {
+      return;
+    }
+    void syncReminders(sessionId);
+    const timer = setInterval(() => {
+      if (AppState.currentState === 'active') {
+        void syncReminders(sessionId);
+      }
+    }, 60_000);
+    const subscription = AppState.addEventListener('change', (next) => {
+      if (next === 'active') {
+        void syncReminders(sessionId);
+      }
+    });
+    return () => {
+      clearInterval(timer);
+      subscription.remove();
+    };
+  }, [sessionId]);
 
   useEffect(() => {
     if (screen.status === 'signed-in' && pendingLink) {

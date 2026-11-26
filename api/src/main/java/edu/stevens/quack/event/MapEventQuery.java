@@ -28,10 +28,14 @@ class MapEventQuery {
             Instant cursorStartsAt,
             UUID cursorId,
             UUID viewerId,
-            int limit) {
+            int limit,
+            Instant now,
+            Instant freeFrom,
+            Instant freeTo) {
         String sql = """
                 select e.id, e.title, e.category, e.visibility,
                        case when e.host_id = ? then e.share_token end as share_token,
+                       (e.starts_at > ? and e.starts_at <= ?) as starting_soon,
                        e.starts_at, e.location_label,
                        ST_Y(e.location::geometry) as latitude,
                        ST_X(e.location::geometry) as longitude,
@@ -53,6 +57,8 @@ class MapEventQuery {
                 """;
         List<Object> args = new ArrayList<>();
         args.add(viewerId);
+        args.add(Timestamp.from(now));
+        args.add(Timestamp.from(now.plus(1, java.time.temporal.ChronoUnit.HOURS)));
         args.add(viewerId);
         args.add(Timestamp.from(from));
         args.add(Timestamp.from(to));
@@ -64,6 +70,15 @@ class MapEventQuery {
         args.add(south);
         args.add(east);
         args.add(north);
+        if (freeFrom != null && freeTo != null) {
+            sql += """
+                     and e.ends_at is not null
+                     and e.starts_at >= ?
+                     and e.ends_at <= ?
+                    """;
+            args.add(Timestamp.from(freeFrom));
+            args.add(Timestamp.from(freeTo));
+        }
         if (cursorStartsAt != null) {
             sql += """
                      and (e.starts_at > ? or (e.starts_at = ? and e.id > ?))
@@ -86,7 +101,8 @@ class MapEventQuery {
                 rs.getLong("attendee_count"),
                 new MapEventPage.MapHost(rs.getString("display_name"), rs.getString("avatar_url")),
                 rs.getString("visibility"),
-                rs.getObject("share_token", UUID.class)),
+                rs.getObject("share_token", UUID.class),
+                rs.getBoolean("starting_soon")),
                 args.toArray());
     }
 }

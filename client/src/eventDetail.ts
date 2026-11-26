@@ -17,6 +17,7 @@ export type EventDetail = {
   shareToken?: string | null;
   joined: boolean;
   hosting: boolean;
+  startingSoon: boolean;
   host: {
     displayName: string;
     avatarUrl: string | null;
