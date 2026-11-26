@@ -3,14 +3,17 @@ import {
   ActivityIndicator,
   Alert,
   BackHandler,
+  Platform,
   Pressable,
   ScrollView,
   Share,
   StyleSheet,
   Text,
+  TextInput,
   View,
   useWindowDimensions,
 } from 'react-native';
+import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   useAnimatedStyle,
@@ -26,10 +29,10 @@ import ClockIcon from '../assets/detail/clock.svg';
 import PeopleIcon from '../assets/detail/people.svg';
 import PlaceIcon from '../assets/detail/place.svg';
 import CloseIcon from '../assets/create/close.svg';
-import { categoryLabel } from './categories';
+import { categories, categoryLabel } from './categories';
 import { openCalendarEditor } from './deviceCalendar';
-import { loadEventDetail, setAttendance, type EventDetail } from './eventDetail';
-import { eventShareLink } from './events';
+import { cancelEvent, loadEventDetail, setAttendance, updateEvent, type EventDetail } from './eventDetail';
+import { eventShareLink, type FieldErrors } from './events';
 import HostAvatar from './HostAvatar';
 // Reanimated's withTiming needs the worklet easing, not core Animated's easeOut.
 import { colors, fonts, sheetEaseOut as easeOut } from './theme';
@@ -40,7 +43,39 @@ type Props = {
   eventId: string;
   token?: string | null;
   onClose: () => void;
+  onChanged?: () => void;
 };
+
+// The server rejects a start past exactly 48 hours, so stop 5 minutes short of the phone clock.
+const MAX_AHEAD_MS = (48 * 60 - 5) * 60 * 1000;
+
+function clampStart(date: Date): Date {
+  const now = Date.now();
+  return new Date(Math.min(Math.max(date.getTime(), now), now + MAX_AHEAD_MS));
+}
+
+function pickStartOnAndroid(current: Date, onPick: (date: Date) => void) {
+  DateTimePickerAndroid.open({
+    value: current,
+    mode: 'date',
+    minimumDate: new Date(),
+    maximumDate: new Date(Date.now() + MAX_AHEAD_MS),
+    onValueChange: (_, date) => {
+      if (!date) {
+        return;
+      }
+      DateTimePickerAndroid.open({
+        value: date,
+        mode: 'time',
+        onValueChange: (__, time) => {
+          if (time) {
+            onPick(clampStart(time));
+          }
+        },
+      });
+    },
+  });
+}
 
 type State =
   | { status: 'loading' }
@@ -49,7 +84,7 @@ type State =
 
 // Frame 06 "Event detail: not joined" in the Quack! Figma redesign. The map stays mounted under the
 // sheet and its camera is never touched, so dismissing returns to the same view.
-export default function EventDetailSheet({ sessionId, eventId, token, onClose }: Props) {
+export default function EventDetailSheet({ sessionId, eventId, token, onClose, onChanged }: Props) {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const reduced = useReducedMotion();
@@ -228,6 +263,29 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose }:
     setActionError(outcome.message);
   }
 
+  // A failed refresh keeps the event already on screen, so a successful cancel still shows Cancelled.
+  const refreshKeeping = useCallback(async (fallback: EventDetail) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15_000);
+    let refreshed: Awaited<ReturnType<typeof loadEventDetail>> | null = null;
+    try {
+      refreshed = await loadEventDetail(sessionId, eventId, controller.signal, token);
+    } catch {
+      refreshed = null;
+    } finally {
+      clearTimeout(timer);
+    }
+    if (refreshed?.ok) {
+      setNeedsRefresh(false);
+      setActionError(null);
+      setState({ status: 'loaded', event: refreshed.event });
+      return;
+    }
+    setState({ status: 'loaded', event: fallback });
+    setNeedsRefresh(true);
+    setActionError('Couldn’t refresh this event. Try again.');
+  }, [sessionId, eventId, token]);
+
   // Keeps "Starts in 25 min" honest while the sheet stays open.
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 30_000);
@@ -309,9 +367,26 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose }:
           event={state.event}
           now={now}
           onAttendance={() => void changeAttendance(state.event)}
-          onRetry={needsRefresh ? () => setAttempt((value) => value + 1) : undefined}
+          onCancelled={(event) => {
+            const cancelledEvent: EventDetail = { ...event, status: 'cancelled' };
+            setState({ status: 'loaded', event: cancelledEvent });
+            setNeedsRefresh(false);
+            setActionError(null);
+            onChanged?.();
+            void refreshKeeping(cancelledEvent);
+          }}
+          onRetry={needsRefresh && state.status === 'loaded'
+            ? () => void refreshKeeping(state.event)
+            : needsRefresh
+              ? () => setAttempt((value) => value + 1)
+              : undefined}
+          onSaved={() => {
+            setAttempt((value) => value + 1);
+            onChanged?.();
+          }}
           pending={pending}
           pendingAction={pendingAction}
+          sessionId={sessionId}
         />
       ) : state.status === 'loading' ? (
         <View accessibilityLabel="Loading event" style={styles.placeholder}>
@@ -366,6 +441,9 @@ function Details({
   actionError,
   onAttendance,
   onRetry,
+  sessionId,
+  onSaved,
+  onCancelled,
 }: {
   event: EventDetail;
   now: Date;
@@ -374,26 +452,114 @@ function Details({
   actionError: string | null;
   onAttendance: () => void;
   onRetry?: () => void;
+  sessionId: string;
+  onSaved: () => void;
+  onCancelled: (event: EventDetail) => void;
 }) {
-  const startsAt = new Date(event.startsAt);
+  const [editing, setEditing] = useState(false);
+  const [title, setTitle] = useState(event.title);
+  const [description, setDescription] = useState(event.description);
+  const [category, setCategory] = useState(event.category);
+  const [locationLabel, setLocationLabel] = useState(event.locationLabel);
+  const [startsAtDraft, setStartsAtDraft] = useState<Date | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+
+  useEffect(() => {
+    if (editing) {
+      return;
+    }
+    setTitle(event.title);
+    setDescription(event.description);
+    setCategory(event.category);
+    setLocationLabel(event.locationLabel);
+    setStartsAtDraft(null);
+    setEditError(null);
+    setFieldErrors({});
+  }, [event, editing]);
+
+  const startsAt = startsAtDraft ?? new Date(event.startsAt);
   const cancelled = event.status === 'cancelled';
   // A selected day is presentation context; only a valid end timestamp determines lifecycle.
   // Legacy NULL end times retain their existing policy and are not inferred to have ended.
   const ended = !cancelled && isEnded(event.endsAt, now);
-  const relative = relativeStart(startsAt, now);
+  const relative = relativeStart(new Date(event.startsAt), now);
   const meta = relative === 'now'
     ? 'Starting now'
     : relative.startsWith('in ')
       ? `Starts ${relative}`
       : `Started ${relative}`;
-  const category = categoryLabel(event.category);
+  const categoryName = categoryLabel(event.category);
+  const canHost = event.hosting && event.status === 'active';
+
+  async function save() {
+    if (saving) {
+      return;
+    }
+    setSaving(true);
+    setEditError(null);
+    const outcome = await updateEvent(sessionId, event.id, {
+      title: title.trim(),
+      description: description.trim(),
+      category,
+      latitude: event.latitude,
+      longitude: event.longitude,
+      locationLabel: locationLabel.trim(),
+      startsAt: startsAtDraft ? startsAtDraft.toISOString() : event.startsAt,
+    });
+    setSaving(false);
+    if (!outcome.ok) {
+      setFieldErrors(outcome.fieldErrors);
+      setEditError(outcome.message);
+      return;
+    }
+    onSaved();
+  }
+
+  function confirmCancel() {
+    Alert.alert(
+      'Cancel this event?',
+      'It stays on this sheet as cancelled and leaves the map.',
+      [
+        { text: 'Keep it', style: 'cancel' },
+        {
+          text: 'Cancel event',
+          style: 'destructive',
+          onPress: () => void runCancel(),
+        },
+      ],
+    );
+  }
+
+  async function runCancel() {
+    if (saving) {
+      return;
+    }
+    setSaving(true);
+    setEditError(null);
+    const outcome = await cancelEvent(sessionId, event.id);
+    setSaving(false);
+    if (!outcome.ok) {
+      setEditError(outcome.message);
+      return;
+    }
+    onCancelled(event);
+  }
+
+  const storedStart = new Date(event.startsAt);
+  const shownStart = startsAtDraft ?? storedStart;
+  const clampedShown = clampStart(shownStart);
+  // The iOS picker cannot show a past time or a time past its maximum. Until the host picks a new
+  // one, show the time Save will send rather than a clamped value.
+  const iosShowsStoredTime = Platform.OS === 'ios' && clampedShown.getTime() !== shownStart.getTime();
 
   return (
-    <ScrollView bounces={false} contentContainerStyle={styles.content}>
+    <ScrollView bounces={false} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <View style={styles.header}>
         <View style={styles.meta}>
           <View style={styles.chip}>
-            <Text style={styles.chipText}>{category}</Text>
+            <Text style={styles.chipText}>{editing ? categoryLabel(category) : categoryName}</Text>
           </View>
           {cancelled ? (
             <View accessibilityLabel="This event was cancelled" style={styles.cancelledChip}>
@@ -407,10 +573,14 @@ function Details({
             <Text style={styles.metaText}>{meta}</Text>
           )}
         </View>
-        <Text accessibilityRole="header" style={[styles.title, cancelled && styles.titleCancelled]}>
-          {event.title}
-        </Text>
-        <Text style={styles.description}>{event.description}</Text>
+        {editing ? (
+          <Text accessibilityRole="header" style={styles.title}>Edit event</Text>
+        ) : (
+          <Text accessibilityRole="header" style={[styles.title, cancelled && styles.titleCancelled]}>
+            {event.title}
+          </Text>
+        )}
+        {editing ? null : <Text style={styles.description}>{event.description}</Text>}
         <View style={styles.host}>
           {/* Same colour as this host's pin on the map. */}
           <HostAvatar host={event.host} size={28} />
@@ -418,75 +588,231 @@ function Details({
         </View>
       </View>
 
-      <View style={styles.details}>
-        <View accessible accessibilityLabel={`${formatWhen(startsAt, now)}, ${cancelled ? 'cancelled' : ended ? 'ended' : relative}`} style={styles.info}>
-          <ClockIcon height={22} width={22} />
-          <View style={styles.infoText}>
-            <Text style={styles.infoMain}>{formatWhen(startsAt, now)}</Text>
-            <Text style={styles.infoSub}>{cancelled ? 'Cancelled by the host' : ended ? 'This event has ended' : relative}</Text>
+      {editing ? (
+        <View style={styles.form}>
+          <Text style={styles.fieldLabel}>Title</Text>
+          <TextInput
+            accessibilityLabel="Title"
+            onChangeText={setTitle}
+            style={styles.input}
+            value={title}
+          />
+          {fieldErrors.title ? <Text style={styles.fieldError}>{fieldErrors.title}</Text> : null}
+
+          <Text style={styles.fieldLabel}>What’s happening?</Text>
+          <TextInput
+            accessibilityLabel="What’s happening?"
+            maxLength={140}
+            onChangeText={setDescription}
+            style={styles.input}
+            value={description}
+          />
+          {fieldErrors.description ? <Text style={styles.fieldError}>{fieldErrors.description}</Text> : null}
+
+          <Text style={styles.fieldLabel}>Category</Text>
+          <View accessibilityLabel="Category" accessibilityRole="radiogroup" style={styles.choiceRow}>
+            {categories.map((name) => {
+              const selected = category === name;
+              const text = categoryLabel(name);
+              return (
+                <Pressable
+                  accessibilityLabel={text}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: selected, disabled: saving }}
+                  disabled={saving}
+                  key={name}
+                  onPress={() => setCategory(name)}
+                  style={({ pressed }) => [styles.choice, selected && styles.choiceSelected, pressed && styles.pressed]}
+                >
+                  <Text style={[styles.choiceText, selected && styles.choiceTextSelected]}>{text}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          {fieldErrors.category ? <Text style={styles.fieldError}>{fieldErrors.category}</Text> : null}
+
+          <Text style={styles.fieldLabel}>When</Text>
+          {iosShowsStoredTime ? (
+            <Pressable
+              accessibilityHint="Opens a date and time picker. The current start is kept until you choose a new one."
+              accessibilityLabel={`When: ${formatWhen(shownStart, now)}`}
+              accessibilityRole="button"
+              disabled={saving}
+              onPress={() => setStartsAtDraft(clampedShown)}
+              style={({ pressed }) => [styles.input, pressed && styles.pressed]}
+            >
+              <Text style={styles.inputText}>{formatWhen(shownStart, now)}</Text>
+            </Pressable>
+          ) : Platform.OS === 'ios' ? (
+            <DateTimePicker
+              accessibilityLabel={`When: ${formatWhen(shownStart, now)}`}
+              disabled={saving}
+              display="compact"
+              maximumDate={new Date(Date.now() + MAX_AHEAD_MS)}
+              minimumDate={new Date()}
+              mode="datetime"
+              onValueChange={(_, date) => {
+                if (date) {
+                  setStartsAtDraft(clampStart(date));
+                }
+              }}
+              value={clampedShown}
+            />
+          ) : (
+            <Pressable
+              accessibilityHint="Opens a date and time picker"
+              accessibilityLabel={`When: ${formatWhen(startsAt, now)}`}
+              accessibilityRole="button"
+              disabled={saving}
+              onPress={() => pickStartOnAndroid(clampStart(startsAt), setStartsAtDraft)}
+              style={({ pressed }) => [styles.input, pressed && styles.pressed]}
+            >
+              <Text style={styles.inputText}>{formatWhen(startsAt, now)}</Text>
+            </Pressable>
+          )}
+          {fieldErrors.startsAt ? <Text style={styles.fieldError}>{fieldErrors.startsAt}</Text> : null}
+
+          <Text style={styles.fieldLabel}>Where exactly?</Text>
+          <TextInput
+            accessibilityLabel="Where exactly?"
+            onChangeText={setLocationLabel}
+            style={styles.input}
+            value={locationLabel}
+          />
+          <Text style={styles.help}>The pin stays where it is. This changes the place name.</Text>
+          {fieldErrors.locationLabel ? <Text style={styles.fieldError}>{fieldErrors.locationLabel}</Text> : null}
+
+          {editError ? (
+            <Text accessibilityLiveRegion="polite" accessibilityRole="alert" style={styles.actionError}>
+              {editError}
+            </Text>
+          ) : null}
+          <Pressable
+            accessibilityLabel={saving ? 'Saving' : 'Save event'}
+            accessibilityRole="button"
+            accessibilityState={{ busy: saving, disabled: saving }}
+            disabled={saving}
+            onPress={() => void save()}
+            style={({ pressed }) => [styles.join, pressed && styles.pressed]}
+          >
+            <Text style={styles.joinText}>{saving ? 'Saving...' : 'Save'}</Text>
+          </Pressable>
+          <Pressable
+            accessibilityLabel="Back"
+            accessibilityRole="button"
+            disabled={saving}
+            onPress={() => setEditing(false)}
+            style={({ pressed }) => [styles.share, pressed && styles.pressed]}
+          >
+            <Text style={styles.shareText}>Back</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <View style={styles.details}>
+          <View accessible accessibilityLabel={`${formatWhen(startsAt, now)}, ${cancelled ? 'cancelled' : ended ? 'ended' : relative}`} style={styles.info}>
+            <ClockIcon height={22} width={22} />
+            <View style={styles.infoText}>
+              <Text style={styles.infoMain}>{formatWhen(startsAt, now)}</Text>
+              <Text style={styles.infoSub}>{cancelled ? 'Cancelled by the host' : ended ? 'This event has ended' : relative}</Text>
+            </View>
+          </View>
+          <View accessible accessibilityLabel={`Location: ${event.locationLabel}`} style={styles.info}>
+            <PlaceIcon height={22} width={22} />
+            <View style={styles.infoText}>
+              <Text style={styles.infoMain}>{event.locationLabel}</Text>
+            </View>
           </View>
         </View>
-        <View accessible accessibilityLabel={`Location: ${event.locationLabel}`} style={styles.info}>
-          <PlaceIcon height={22} width={22} />
-          <View style={styles.infoText}>
-            <Text style={styles.infoMain}>{event.locationLabel}</Text>
+      )}
+
+      {editing ? null : (
+        <>
+          <View style={styles.divider} />
+
+          <View
+            accessible
+            accessibilityLabel={`${event.attendeeCount} going`}
+            style={styles.attendees}
+          >
+            <PeopleIcon height={22} width={22} />
+            <Text style={styles.count}>{event.attendeeCount} going</Text>
           </View>
-        </View>
-      </View>
 
-      <View style={styles.divider} />
-
-      <View
-        accessible
-        accessibilityLabel={`${event.attendeeCount} going`}
-        style={styles.attendees}
-      >
-        <PeopleIcon height={22} width={22} />
-        <Text style={styles.count}>{event.attendeeCount} going</Text>
-      </View>
-
-      {(event.status === 'active' && !ended) || event.joined ? (
-        <Pressable
-          accessibilityLabel={attendanceLabel(event.joined, pendingAction)}
-          accessibilityRole="button"
-          accessibilityState={{ busy: pending, disabled: pending }}
-          disabled={pending}
-          onPress={onAttendance}
-          style={({ pressed }) => [styles.join, pressed && styles.pressed]}
-        >
-          <Text style={styles.joinText}>{attendanceLabel(event.joined, pendingAction)}</Text>
-        </Pressable>
-      ) : null}
-      {event.joined ? (
-        <Text accessibilityLabel="Leaving this event in Quack won’t remove it from your calendar." style={styles.calendarReminder}>
-          Leaving this event in Quack won’t remove it from your calendar.
-        </Text>
-      ) : null}
-      {actionError ? (
-        <Text accessibilityLiveRegion="polite" accessibilityRole="alert" style={styles.actionError}>
-          {actionError}
-        </Text>
-      ) : null}
-      {onRetry ? (
-        <Pressable
-          accessibilityLabel="Try loading the event again"
-          accessibilityRole="button"
-          onPress={onRetry}
-          style={({ pressed }) => [styles.retry, pressed && styles.pressed]}
-        >
-          <Text style={styles.retryText}>Try again</Text>
-        </Pressable>
-      ) : null}
-      {event.shareToken ? (
-        <Pressable
-          accessibilityLabel="Share link"
-          accessibilityRole="button"
-          onPress={() => void Share.share({ message: eventShareLink(event.id, event.shareToken ?? '') })}
-          style={({ pressed }) => [styles.share, pressed && styles.pressed]}
-        >
-          <Text style={styles.shareText}>Share link</Text>
-        </Pressable>
-      ) : null}
+          {(event.status === 'active' && !ended) || event.joined ? (
+            <Pressable
+              accessibilityLabel={attendanceLabel(event.joined, pendingAction)}
+              accessibilityRole="button"
+              accessibilityState={{ busy: pending || saving, disabled: pending || saving }}
+              disabled={pending || saving}
+              onPress={onAttendance}
+              style={({ pressed }) => [styles.join, pressed && styles.pressed]}
+            >
+              <Text style={styles.joinText}>{attendanceLabel(event.joined, pendingAction)}</Text>
+            </Pressable>
+          ) : null}
+          {event.joined ? (
+            <Text accessibilityLabel="Leaving this event in Quack won’t remove it from your calendar." style={styles.calendarReminder}>
+              Leaving this event in Quack won’t remove it from your calendar.
+            </Text>
+          ) : null}
+          {actionError ? (
+            <Text accessibilityLiveRegion="polite" accessibilityRole="alert" style={styles.actionError}>
+              {actionError}
+            </Text>
+          ) : null}
+          {editError ? (
+            <Text accessibilityLiveRegion="polite" accessibilityRole="alert" style={styles.actionError}>
+              {editError}
+            </Text>
+          ) : null}
+          {onRetry ? (
+            <Pressable
+              accessibilityLabel="Try loading the event again"
+              accessibilityRole="button"
+              onPress={onRetry}
+              style={({ pressed }) => [styles.retry, pressed && styles.pressed]}
+            >
+              <Text style={styles.retryText}>Try again</Text>
+            </Pressable>
+          ) : null}
+          {canHost ? (
+            <Pressable
+              accessibilityLabel="Edit event"
+              accessibilityRole="button"
+              disabled={saving}
+              onPress={() => {
+                setEditError(null);
+                setEditing(true);
+              }}
+              style={({ pressed }) => [styles.share, pressed && styles.pressed]}
+            >
+              <Text style={styles.shareText}>Edit</Text>
+            </Pressable>
+          ) : null}
+          {canHost ? (
+            <Pressable
+              accessibilityLabel="Cancel event"
+              accessibilityRole="button"
+              accessibilityState={{ busy: saving, disabled: saving }}
+              disabled={saving}
+              onPress={confirmCancel}
+              style={({ pressed }) => [styles.share, pressed && styles.pressed]}
+            >
+              <Text style={styles.shareText}>{saving ? 'Cancelling...' : 'Cancel event'}</Text>
+            </Pressable>
+          ) : null}
+          {event.shareToken ? (
+            <Pressable
+              accessibilityLabel="Share link"
+              accessibilityRole="button"
+              onPress={() => void Share.share({ message: eventShareLink(event.id, event.shareToken ?? '') })}
+              style={({ pressed }) => [styles.share, pressed && styles.pressed]}
+            >
+              <Text style={styles.shareText}>Share link</Text>
+            </Pressable>
+          ) : null}
+        </>
+      )}
     </ScrollView>
   );
 }
@@ -723,6 +1049,64 @@ const styles = StyleSheet.create({
     color: colors.redDeep,
     fontSize: 16,
     fontWeight: '600',
+  },
+  form: {
+    gap: 8,
+    paddingBottom: 12,
+  },
+  fieldLabel: {
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: '600',
+    marginTop: 8,
+  },
+  input: {
+    backgroundColor: colors.paper,
+    borderColor: colors.inputLine,
+    borderRadius: 12,
+    borderWidth: 1,
+    color: colors.ink,
+    fontSize: 16,
+    minHeight: 48,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  inputText: {
+    color: colors.ink,
+    fontSize: 16,
+  },
+  help: {
+    color: colors.muted,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  fieldError: {
+    color: colors.red,
+    fontSize: 13,
+  },
+  choiceRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  choice: {
+    borderColor: colors.line,
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  choiceSelected: {
+    backgroundColor: colors.red,
+    borderColor: colors.red,
+  },
+  choiceText: {
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  choiceTextSelected: {
+    color: colors.white,
   },
   pressed: {
     opacity: 0.85,

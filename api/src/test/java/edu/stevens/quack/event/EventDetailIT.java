@@ -89,6 +89,9 @@ class EventDetailIT extends PostgresIntegrationTest {
                 .jsonPath("$.attendeeCount").isEqualTo(0)
                 .jsonPath("$.visibility").isEqualTo("public")
                 .jsonPath("$.joined").isEqualTo(false)
+                .jsonPath("$.hosting").isEqualTo(false)
+                .jsonPath("$.latitude").isEqualTo(40.745)
+                .jsonPath("$.longitude").isEqualTo(-74.025)
                 .jsonPath("$.shareToken").doesNotExist();
     }
 
@@ -109,7 +112,7 @@ class EventDetailIT extends PostgresIntegrationTest {
         Map<String, Object> json = JsonPath.read(body, "$");
         assertThat(json).containsOnlyKeys(
                 "id", "title", "description", "category", "locationLabel", "startsAt", "endsAt", "status", "host",
-                "attendeeCount", "visibility", "joined");
+                "attendeeCount", "visibility", "joined", "latitude", "longitude", "hosting");
         Map<String, Object> host = JsonPath.read(body, "$.host");
         assertThat(host).containsOnlyKeys("displayName", "avatarUrl");
     }
@@ -164,7 +167,8 @@ class EventDetailIT extends PostgresIntegrationTest {
                 .expectStatus().isOk()
                 .expectBody()
                 .jsonPath("$.shareToken").isEqualTo(token.toString())
-                .jsonPath("$.visibility").isEqualTo("link_only");
+                .jsonPath("$.visibility").isEqualTo("link_only")
+                .jsonPath("$.hosting").isEqualTo(true);
     }
 
     @Test
