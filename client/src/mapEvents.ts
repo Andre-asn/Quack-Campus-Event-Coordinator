@@ -63,7 +63,7 @@ export async function loadMapEvents(
   const { from, to } = selectedDay === campusDayKey(new Date())
     ? campusDayRange(new Date())
     : campusDayRangeForKey(selectedDay);
-  const url = `${apiBaseUrl}/api/v1/events?bbox=${encodeURIComponent(bbox)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=100`;
+  const url = `${apiBaseUrl.replace(/\/$/, '')}/api/v1/events?bbox=${encodeURIComponent(bbox)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=100`;
   const headers: Record<string, string> = {
     Accept: 'application/json',
     Cookie: `${sessionCookieName}=${sessionId}`,
