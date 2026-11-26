@@ -549,8 +549,10 @@ function Details({
 
   const storedStart = new Date(event.startsAt);
   const shownStart = startsAtDraft ?? storedStart;
-  // The iOS picker cannot show a past time, so an unchanged start stays as text until the host changes it.
-  const iosClampsStart = Platform.OS === 'ios' && shownStart.getTime() < Date.now();
+  const clampedShown = clampStart(shownStart);
+  // The iOS picker cannot show a past time or a time past its maximum. Until the host picks a new
+  // one, show the time Save will send rather than a clamped value.
+  const iosShowsStoredTime = Platform.OS === 'ios' && clampedShown.getTime() !== shownStart.getTime();
 
   return (
     <ScrollView bounces={false} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
@@ -630,13 +632,13 @@ function Details({
           {fieldErrors.category ? <Text style={styles.fieldError}>{fieldErrors.category}</Text> : null}
 
           <Text style={styles.fieldLabel}>When</Text>
-          {iosClampsStart ? (
+          {iosShowsStoredTime ? (
             <Pressable
               accessibilityHint="Opens a date and time picker. The current start is kept until you choose a new one."
               accessibilityLabel={`When: ${formatWhen(shownStart, now)}`}
               accessibilityRole="button"
               disabled={saving}
-              onPress={() => setStartsAtDraft(clampStart(shownStart))}
+              onPress={() => setStartsAtDraft(clampedShown)}
               style={({ pressed }) => [styles.input, pressed && styles.pressed]}
             >
               <Text style={styles.inputText}>{formatWhen(shownStart, now)}</Text>
@@ -654,7 +656,7 @@ function Details({
                   setStartsAtDraft(clampStart(date));
                 }
               }}
-              value={clampStart(shownStart)}
+              value={clampedShown}
             />
           ) : (
             <Pressable
