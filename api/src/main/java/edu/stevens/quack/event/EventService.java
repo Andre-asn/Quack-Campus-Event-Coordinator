@@ -339,6 +339,8 @@ public class EventService {
                 event.getDescription(),
                 event.getCategory(),
                 event.getLocationLabel(),
+                event.getLatitude(),
+                event.getLongitude(),
                 event.getStartsAt(),
                 event.getEndsAt(),
                 event.getStatus(),

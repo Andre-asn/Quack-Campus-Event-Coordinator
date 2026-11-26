@@ -13,6 +13,8 @@ public record EventDetail(
         String description,
         String category,
         String locationLabel,
+        double latitude,
+        double longitude,
         Instant startsAt,
         Instant endsAt,
         String status,
