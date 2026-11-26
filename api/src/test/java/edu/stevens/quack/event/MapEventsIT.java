@@ -345,7 +345,7 @@ class MapEventsIT extends PostgresIntegrationTest {
     @Test
     void returnsTheLocationLabelAndAttendeeCountBeforeAndAfterAJoinAndLeave() {
         User host = host("ada");
-        Event event = joinable(save(host, "Inside", 40.745, -74.025, noonToday()));
+        Event event = save(host, "Inside", 40.745, -74.025, noonToday());
         String guest = sessionFor(host("grace"));
         var uri = mapUri(BBOX, startOfToday(), startOfTomorrow(), 50, null);
 
@@ -385,7 +385,7 @@ class MapEventsIT extends PostgresIntegrationTest {
     @Test
     void changesTheEtagWhenSomeoneJoins() {
         User host = host("ada");
-        Event event = joinable(save(host, "Inside", 40.745, -74.025, noonToday()));
+        Event event = save(host, "Inside", 40.745, -74.025, noonToday());
         String guest = sessionFor(host("grace"));
         var uri = mapUri(BBOX, startOfToday(), startOfTomorrow(), 50, null);
 
@@ -417,7 +417,7 @@ class MapEventsIT extends PostgresIntegrationTest {
     @Test
     void changesTheEtagWhenSomeoneLeaves() {
         User host = host("ada");
-        Event event = joinable(save(host, "Inside", 40.745, -74.025, noonToday()));
+        Event event = save(host, "Inside", 40.745, -74.025, noonToday());
         String guest = sessionFor(host("grace"));
         var uri = mapUri(BBOX, startOfToday(), startOfTomorrow(), 50, null);
         join(event, guest);
@@ -454,7 +454,7 @@ class MapEventsIT extends PostgresIntegrationTest {
     @Test
     void countsEachAttendeeOnceIncludingARepeatedJoin() {
         User host = host("ada");
-        Event event = joinable(save(host, "Inside", 40.745, -74.025, noonToday()));
+        Event event = save(host, "Inside", 40.745, -74.025, noonToday());
         String grace = sessionFor(host("grace"));
         String alan = sessionFor(host("alan"));
         join(event, grace);
@@ -473,7 +473,7 @@ class MapEventsIT extends PostgresIntegrationTest {
     @Test
     void countsSimultaneousJoins() throws Exception {
         User host = host("ada");
-        Event event = joinable(save(host, "Inside", 40.745, -74.025, noonToday()));
+        Event event = save(host, "Inside", 40.745, -74.025, noonToday());
         List<String> sessions = new ArrayList<>();
         for (int i = 0; i < 8; i++) {
             sessions.add(sessionFor(host("guest" + i)));
@@ -561,12 +561,6 @@ class MapEventsIT extends PostgresIntegrationTest {
                 set starts_at = starts_at + ((cast(? as date) - (now() at time zone 'America/New_York')::date) * interval '1 day'),
                     ends_at = ends_at + ((cast(? as date) - (now() at time zone 'America/New_York')::date) * interval '1 day')
                 """, testToday, testToday);
-    }
-
-    // Noon today has ended by mid-afternoon, and an ended event refuses joins (409), so push the end out.
-    private Event joinable(Event event) {
-        jdbc.update("update events set ends_at = now() + interval '1 day' where id = ?", event.getId());
-        return event;
     }
 
     private void get(java.util.function.Function<UriBuilder, URI> uri, String session) {
