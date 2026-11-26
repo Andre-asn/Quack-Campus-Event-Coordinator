@@ -1,5 +1,11 @@
 export const CAMPUS_TIME_ZONE = 'America/New_York';
 
+export type CalendarDay = {
+  year: number;
+  month: number;
+  day: number;
+};
+
 export function campusDayKey(now: Date): string {
   const day = campusDate(now);
   return `${day.year}-${day.month}-${day.day}`;
@@ -10,6 +16,68 @@ export function isCampusDayBefore(dayKey: string, now: Date): boolean {
   const today = campusDate(now);
   return Date.UTC(day.year, day.month - 1, day.day)
     < Date.UTC(today.year, today.month - 1, today.day);
+}
+
+export function isCampusDayInWindow(dayKey: string, now: Date): boolean {
+  const day = parseCalendarDay(dayKey);
+  const today = campusDate(now);
+  const value = calendarDayNumber(day);
+  const earliest = calendarDayNumber(addDays(today, -1));
+  const latest = calendarDayNumber(addDays(today, 1));
+  return value >= earliest && value <= latest;
+}
+
+export function clampCampusDay(dayKey: string, now: Date): string {
+  const today = campusDate(now);
+  const day = parseCalendarDay(dayKey);
+  const value = calendarDayNumber(day);
+  const yesterday = addDays(today, -1);
+  const tomorrow = addDays(today, 1);
+  if (value < calendarDayNumber(yesterday)) {
+    return campusDayKeyFromCalendarDay(yesterday);
+  }
+  if (value > calendarDayNumber(tomorrow)) {
+    return campusDayKeyFromCalendarDay(tomorrow);
+  }
+  return campusDayKeyFromCalendarDay(day);
+}
+
+export function reanchorCampusDay(selectedDay: string, now: Date): { anchorDay: string; selectedDay: string } {
+  return {
+    anchorDay: campusDayKey(now),
+    selectedDay: clampCampusDay(selectedDay, now),
+  };
+}
+
+export function shiftCampusDay(dayKey: string, days: number): string {
+  return campusDayKeyFromCalendarDay(addDays(parseCalendarDay(dayKey), days));
+}
+
+export function campusDayLabel(dayKey: string, now: Date): string {
+  return campusDayLabelForAnchor(dayKey, campusDayKey(now));
+}
+
+export function campusDayLabelForAnchor(dayKey: string, today: string): string {
+  if (dayKey === today) {
+    return 'Today';
+  }
+  if (dayKey === shiftCampusDay(today, -1)) {
+    return 'Yesterday';
+  }
+  if (dayKey === shiftCampusDay(today, 1)) {
+    return 'Tomorrow';
+  }
+  const day = parseCalendarDay(dayKey);
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(new Date(Date.UTC(day.year, day.month - 1, day.day)));
+}
+
+export function eventCountLabel(count: number, dayLabel: string): string {
+  return `${count} ${count === 1 ? 'event' : 'events'} ${dayLabel.toLowerCase()}`;
 }
 
 export function campusDayRange(now: Date): { from: string; to: string } {
@@ -58,6 +126,14 @@ function campusDate(now: Date): CalendarDay {
   return { year: num('year'), month: num('month'), day: num('day') };
 }
 
+function campusDayKeyFromCalendarDay(day: CalendarDay): string {
+  return `${day.year}-${day.month}-${day.day}`;
+}
+
+function calendarDayNumber(day: CalendarDay): number {
+  return Date.UTC(day.year, day.month - 1, day.day);
+}
+
 function addDays(day: CalendarDay, days: number): CalendarDay {
   const shifted = new Date(Date.UTC(day.year, day.month - 1, day.day + days));
   return {
@@ -69,8 +145,10 @@ function addDays(day: CalendarDay, days: number): CalendarDay {
 
 function campusMidnight(day: CalendarDay): Date {
   const utcMidnight = new Date(Date.UTC(day.year, day.month - 1, day.day, 0, 0, 0));
-  const offset = timeZoneOffsetMs(utcMidnight, CAMPUS_TIME_ZONE);
-  return new Date(utcMidnight.getTime() - offset);
+  // Recompute once after applying the first offset. This handles DST transitions where
+  // UTC midnight falls on the previous local calendar day.
+  const first = new Date(utcMidnight.getTime() - timeZoneOffsetMs(utcMidnight, CAMPUS_TIME_ZONE));
+  return new Date(utcMidnight.getTime() - timeZoneOffsetMs(first, CAMPUS_TIME_ZONE));
 }
 
 function timeZoneOffsetMs(date: Date, timeZone: string): number {
@@ -88,9 +166,3 @@ function timeZoneOffsetMs(date: Date, timeZone: string): number {
   const asUtc = Date.UTC(num('year'), num('month') - 1, num('day'), num('hour'), num('minute'), num('second'));
   return asUtc - date.getTime();
 }
-
-type CalendarDay = {
-  year: number;
-  month: number;
-  day: number;
-};
