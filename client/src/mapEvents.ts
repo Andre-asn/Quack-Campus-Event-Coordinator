@@ -68,7 +68,7 @@ export async function loadMapEvents(
   const free = freeWindow
     ? `&freeFrom=${encodeURIComponent(freeWindow.from)}&freeTo=${encodeURIComponent(freeWindow.to)}`
     : '';
-  const url = `${apiBaseUrl}/api/v1/events?bbox=${encodeURIComponent(bbox)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=100${free}`;
+  const url = `${apiBaseUrl.replace(/\/$/, '')}/api/v1/events?bbox=${encodeURIComponent(bbox)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=100${free}`;
   const headers: Record<string, string> = {
     Accept: 'application/json',
     Cookie: `${sessionCookieName}=${sessionId}`,

@@ -6,7 +6,7 @@
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
-    "test": "node --test --experimental-strip-types tests/*.test.mjs",
+    "test": "node --test --experimental-strip-types --loader ./tests/ts-extension-loader.mjs tests/*.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
