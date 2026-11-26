@@ -5,10 +5,12 @@ import {
   campusDayKey,
   campusDayLabelForAnchor,
   campusDayRange,
+  campusDayRangeForKey,
   eventCountLabel,
   reanchorCampusDay,
   shiftCampusDay,
 } from '../src/campusTime.ts';
+import { isLatestMapLoad, mapEventQueryUrl } from '../src/mapQuery.ts';
 import { mapQueryFailed, mapQueryStarted } from '../src/mapLoadingState.ts';
 
 const anchor = '2026-11-4';
@@ -60,4 +62,31 @@ test('loading and failed queries do not expose a zero-event count', () => {
 test('event counts use the selected campus-day label and preserve grammar', () => {
   assert.equal(eventCountLabel(1, 'Yesterday'), '1 event yesterday');
   assert.equal(eventCountLabel(2, 'Tomorrow'), '2 events tomorrow');
+});
+
+test('map requests preserve the selected day while the viewport changes', () => {
+  const range = campusDayRangeForKey('2026-11-5');
+  const first = new URL(mapEventQueryUrl(
+    'https://api.example.test/',
+    '-74.03,40.74,-74.02,40.75',
+    range.from,
+    range.to,
+  ));
+  const second = new URL(mapEventQueryUrl(
+    'https://api.example.test/',
+    '-74.04,40.73,-74.01,40.76',
+    range.from,
+    range.to,
+  ));
+
+  assert.equal(first.searchParams.get('from'), '2026-11-05T05:00:00.000Z');
+  assert.equal(first.searchParams.get('to'), '2026-11-06T05:00:00.000Z');
+  assert.equal(second.searchParams.get('from'), first.searchParams.get('from'));
+  assert.equal(second.searchParams.get('to'), first.searchParams.get('to'));
+  assert.notEqual(second.searchParams.get('bbox'), first.searchParams.get('bbox'));
+});
+
+test('stale map generations cannot update the current cache', () => {
+  assert.equal(isLatestMapLoad(1, 2), false);
+  assert.equal(isLatestMapLoad(2, 2), true);
 });
