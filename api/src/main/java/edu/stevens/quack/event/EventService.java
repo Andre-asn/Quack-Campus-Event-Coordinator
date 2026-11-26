@@ -281,6 +281,8 @@ public class EventService {
                 event.getDescription(),
                 event.getCategory(),
                 event.getLocationLabel(),
+                event.getLatitude(),
+                event.getLongitude(),
                 event.getStartsAt(),
                 event.getEndsAt(),
                 event.getStatus(),
@@ -288,7 +290,8 @@ public class EventService {
                 attendance.countByEventId(event.getId()),
                 event.getVisibility(),
                 shareToken,
-                attendance.isAttending(event.getId(), viewer.getId()));
+                attendance.isAttending(event.getId(), viewer.getId()),
+                viewer.getId().equals(event.getHostId()));
     }
 
     private static boolean opens(Event event, String token) {
