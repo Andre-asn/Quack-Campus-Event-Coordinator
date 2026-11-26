@@ -1,4 +1,4 @@
-const CAMPUS = 'America/New_York';
+export const CAMPUS_TIME_ZONE = 'America/New_York';
 
 export function campusDayKey(now: Date): string {
   const day = campusDate(now);
@@ -49,7 +49,7 @@ function campusDayRangeForCalendarDay(today: CalendarDay): { from: string; to: s
 
 function campusDate(now: Date): CalendarDay {
   const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: CAMPUS,
+    timeZone: CAMPUS_TIME_ZONE,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -69,7 +69,7 @@ function addDays(day: CalendarDay, days: number): CalendarDay {
 
 function campusMidnight(day: CalendarDay): Date {
   const utcMidnight = new Date(Date.UTC(day.year, day.month - 1, day.day, 0, 0, 0));
-  const offset = timeZoneOffsetMs(utcMidnight, CAMPUS);
+  const offset = timeZoneOffsetMs(utcMidnight, CAMPUS_TIME_ZONE);
   return new Date(utcMidnight.getTime() - offset);
 }
 

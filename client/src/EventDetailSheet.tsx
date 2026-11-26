@@ -30,6 +30,7 @@ import PeopleIcon from '../assets/detail/people.svg';
 import PlaceIcon from '../assets/detail/place.svg';
 import CloseIcon from '../assets/create/close.svg';
 import { categories, categoryLabel } from './categories';
+import { openCalendarEditor } from './deviceCalendar';
 import { cancelEvent, loadEventDetail, setAttendance, updateEvent, type EventDetail } from './eventDetail';
 import { eventShareLink, type FieldErrors } from './events';
 import HostAvatar from './HostAvatar';
@@ -94,11 +95,59 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose, o
   const [pendingAction, setPendingAction] = useState<'join' | 'leave' | null>(null);
   const [needsRefresh, setNeedsRefresh] = useState(false);
   const attendanceRequest = useRef(0);
+  const calendarOfferShown = useRef(false);
+  const calendarActionStarted = useRef(false);
+  const mounted = useRef(true);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const offset = useSharedValue(reduced ? 0 : windowHeight);
   const opacity = useSharedValue(reduced ? 0 : 1);
   const dragStart = useSharedValue(0);
+
+  useEffect(() => {
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    calendarOfferShown.current = false;
+    calendarActionStarted.current = false;
+  }, [eventId]);
+
+  function offerCalendar(event: EventDetail) {
+    if (!mounted.current || calendarOfferShown.current) {
+      return;
+    }
+    calendarOfferShown.current = true;
+    Alert.alert(
+      'Add to calendar?',
+      'Leaving this event in Quack won’t remove it from your calendar.',
+      [
+        { text: 'Not now', style: 'cancel' },
+        {
+          text: 'Add to calendar',
+          onPress: () => {
+            if (calendarActionStarted.current) {
+              return;
+            }
+            calendarActionStarted.current = true;
+            void openCalendarEditor(event).then((result) => {
+              if (result.ok || !mounted.current) {
+                return;
+              }
+              Alert.alert(
+                result.reason === 'invalid-time' ? 'Can’t add to calendar' : 'Calendar unavailable',
+                result.reason === 'invalid-time'
+                  ? 'This event has no valid end time, so its duration is unavailable.'
+                  : 'The device calendar editor could not be opened. Your Quack join is still intact.',
+              );
+            });
+          },
+        },
+      ],
+    );
+  }
 
   useEffect(() => {
     if (reduced) {
@@ -186,12 +235,25 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose, o
     if (refreshed?.ok) {
       setNeedsRefresh(false);
       setState({ status: 'loaded', event: refreshed.event });
+      if (outcome.ok && joining) {
+        offerCalendar(refreshed.event);
+      }
+      if (outcome.ok && !joining) {
+        calendarOfferShown.current = false;
+        calendarActionStarted.current = false;
+      }
       if (!outcome.ok && refreshed.event.joined !== joining) {
         setActionError(outcome.message);
       }
       return;
     }
     if (outcome.ok) {
+      if (joining) {
+        offerCalendar({ ...previous, joined: true });
+      } else {
+        calendarOfferShown.current = false;
+        calendarActionStarted.current = false;
+      }
       setNeedsRefresh(true);
       setActionError('Couldn’t refresh this event. Try again.');
       return;
@@ -686,6 +748,11 @@ function Details({
               <Text style={styles.joinText}>{attendanceLabel(event.joined, pendingAction)}</Text>
             </Pressable>
           ) : null}
+          {event.joined ? (
+            <Text accessibilityLabel="Leaving this event in Quack won’t remove it from your calendar." style={styles.calendarReminder}>
+              Leaving this event in Quack won’t remove it from your calendar.
+            </Text>
+          ) : null}
           {actionError ? (
             <Text accessibilityLiveRegion="polite" accessibilityRole="alert" style={styles.actionError}>
               {actionError}
@@ -959,6 +1026,12 @@ const styles = StyleSheet.create({
   actionError: {
     color: colors.red,
     fontSize: 14,
+    marginTop: 8,
+  },
+  calendarReminder: {
+    color: colors.muted,
+    fontSize: 13,
+    lineHeight: 18,
     marginTop: 8,
   },
   share: {
