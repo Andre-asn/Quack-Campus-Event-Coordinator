@@ -42,6 +42,7 @@ import {
   type LeadMinutes,
 } from './reminders';
 import { eventShareLink, type FieldErrors } from './events';
+import { shouldDropReminderAfterUnmount } from './reminderClose';
 import HostAvatar from './HostAvatar';
 // Reanimated's withTiming needs the worklet easing, not core Animated's easeOut.
 import { colors, fonts, sheetEaseOut as easeOut } from './theme';
@@ -175,7 +176,8 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose, o
   useEffect(() => {
     const controller = new AbortController();
     let cancelled = false;
-    attendanceRequest.current += 1;
+    const requestId = attendanceRequest.current + 1;
+    attendanceRequest.current = requestId;
     setState({ status: 'loading' });
     setPending(false);
     setPendingAction(null);
@@ -183,7 +185,7 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose, o
     setActionError(null);
     loadEventDetail(sessionId, eventId, controller.signal, token)
       .then((result) => {
-        if (cancelled) {
+        if (cancelled || requestId !== attendanceRequest.current) {
           return;
         }
         setState(result.ok
@@ -194,7 +196,7 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose, o
         }
       })
       .catch(() => {
-        if (!cancelled) {
+        if (!cancelled && requestId === attendanceRequest.current) {
           setState({ status: 'failed', message: 'Couldn’t reach Quack!. Check your connection.', retry: true });
         }
       });
@@ -315,6 +317,7 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose, o
 
   // A failed refresh keeps the event already on screen, so a successful cancel still shows Cancelled.
   const refreshKeeping = useCallback(async (fallback: EventDetail) => {
+    const seen = attendanceRequest.current;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 15_000);
     let refreshed: Awaited<ReturnType<typeof loadEventDetail>> | null = null;
@@ -324,6 +327,9 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose, o
       refreshed = null;
     } finally {
       clearTimeout(timer);
+    }
+    if (!mounted.current || seen !== attendanceRequest.current) {
+      return;
     }
     const event = refreshed?.ok ? refreshed.event : fallback;
     if (refreshed?.ok) {
@@ -443,6 +449,7 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose, o
           onAttendance={() => void changeAttendance(state.event)}
           onCancelled={(event) => {
             const cancelledEvent: EventDetail = { ...event, status: 'cancelled' };
+            attendanceRequest.current += 1;
             setState({ status: 'loaded', event: cancelledEvent });
             setNeedsRefresh(false);
             setActionError(null);
@@ -461,6 +468,7 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose, o
           pending={pending}
           pendingAction={pendingAction}
           sessionId={sessionId}
+          sheetMounted={mounted}
           token={token}
         />
       ) : state.status === 'loading' ? (
@@ -518,6 +526,7 @@ function Details({
   onRetry,
   sessionId,
   token,
+  sheetMounted,
   onSaved,
   onCancelled,
 }: {
@@ -530,6 +539,7 @@ function Details({
   onRetry?: () => void;
   sessionId: string;
   token?: string | null;
+  sheetMounted: { current: boolean };
   onSaved: () => void;
   onCancelled: (event: EventDetail) => void;
 }) {
@@ -884,7 +894,7 @@ function Details({
           ) : null}
           <Announcements event={event} sessionId={sessionId} token={token} />
           {event.joined && event.status === 'active' && !ended ? (
-            <Reminder event={event} sessionId={sessionId} token={token} />
+            <Reminder event={event} sessionId={sessionId} sheetMounted={sheetMounted} token={token} />
           ) : null}
           {event.shareToken ? (
             <Pressable
@@ -1003,10 +1013,12 @@ function Announcements({
 function Reminder({
   event,
   sessionId,
+  sheetMounted,
   token,
 }: {
   event: EventDetail;
   sessionId: string;
+  sheetMounted: { current: boolean };
   token?: string | null;
 }) {
   const [lead, setLead] = useState<LeadMinutes | null>(null);
@@ -1036,7 +1048,9 @@ function Reminder({
     setMessage(null);
     const outcome = await chooseReminder(sessionId, event.id, event.title, event.startsAt, next, token);
     if (current !== generation.current) {
-      await cancelLocalReminder(event.id);
+      if (outcome.ok && shouldDropReminderAfterUnmount(sheetMounted.current)) {
+        await cancelLocalReminder(event.id);
+      }
       return;
     }
     setBusy(false);
