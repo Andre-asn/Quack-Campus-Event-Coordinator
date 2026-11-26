@@ -5,9 +5,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -24,7 +26,10 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -39,10 +44,21 @@ import edu.stevens.quack.user.User;
 import edu.stevens.quack.user.UserRepository;
 
 @AutoConfigureRestTestClient
+@Import(MapEventsIT.FixedClockConfig.class)
 class MapEventsIT extends PostgresIntegrationTest {
 
+    private static final Instant TEST_NOW = Instant.parse("2026-11-04T17:00:00Z");
     private static final ZoneId CAMPUS = EventService.CAMPUS;
     private static final String BBOX = "-74.03,40.74,-74.02,40.75";
+
+    @TestConfiguration
+    static class FixedClockConfig {
+        @Bean
+        @org.springframework.context.annotation.Primary
+        Clock testClock() {
+            return Clock.fixed(TEST_NOW, ZoneOffset.UTC);
+        }
+    }
 
     @Autowired
     RestTestClient client;
@@ -208,8 +224,8 @@ class MapEventsIT extends PostgresIntegrationTest {
     void acceptsTheInclusiveWindowEdgesButRejectsTheExclusiveOutsideEdges() {
         User host = host("ada");
         String session = sessionFor(host);
-        Instant yesterday = LocalDate.now(CAMPUS).minusDays(1).atStartOfDay(CAMPUS).toInstant();
-        Instant dayAfterTomorrow = LocalDate.now(CAMPUS).plusDays(2).atStartOfDay(CAMPUS).toInstant();
+        Instant yesterday = LocalDate.ofInstant(TEST_NOW, CAMPUS).minusDays(1).atStartOfDay(CAMPUS).toInstant();
+        Instant dayAfterTomorrow = LocalDate.ofInstant(TEST_NOW, CAMPUS).plusDays(2).atStartOfDay(CAMPUS).toInstant();
 
         client.get().uri(mapUri(BBOX, yesterday, yesterday.plus(1, ChronoUnit.HOURS), 50, null))
                 .header(HttpHeaders.COOKIE, "JSESSIONID=" + session)
@@ -510,6 +526,7 @@ class MapEventsIT extends PostgresIntegrationTest {
     @Test
     void answersWithinTheLatencyTargetWithTwoThousandSeededEventsAndAttendees() throws Exception {
         jdbc.execute(Files.readString(Path.of("scripts/seed-events.sql")));
+        alignSeedDatesWithTestClock();
         // Five attendees on every event, never its own host (the API never auto-joins a host).
         jdbc.update("""
                 insert into event_attendance (event_id, user_id)
@@ -535,6 +552,15 @@ class MapEventsIT extends PostgresIntegrationTest {
         Arrays.sort(millis);
         long p95 = millis[(int) Math.ceil(millis.length * 0.95) - 1];
         assertThat(p95).as("p95 map query latency in ms").isLessThan(500);
+    }
+
+    private void alignSeedDatesWithTestClock() {
+        LocalDate testToday = LocalDate.ofInstant(TEST_NOW, CAMPUS);
+        jdbc.update("""
+                update events
+                set starts_at = starts_at + ((cast(? as date) - (now() at time zone 'America/New_York')::date) * interval '1 day'),
+                    ends_at = ends_at + ((cast(? as date) - (now() at time zone 'America/New_York')::date) * interval '1 day')
+                """, testToday, testToday);
     }
 
     // Noon today has ended by mid-afternoon, and an ended event refuses joins (409), so push the end out.
@@ -588,15 +614,15 @@ class MapEventsIT extends PostgresIntegrationTest {
     }
 
     private static Instant startOfToday() {
-        return LocalDate.now(CAMPUS).atStartOfDay(CAMPUS).toInstant();
+        return LocalDate.ofInstant(TEST_NOW, CAMPUS).atStartOfDay(CAMPUS).toInstant();
     }
 
     private static Instant startOfTomorrow() {
-        return LocalDate.now(CAMPUS).plusDays(1).atStartOfDay(CAMPUS).toInstant();
+        return LocalDate.ofInstant(TEST_NOW, CAMPUS).plusDays(1).atStartOfDay(CAMPUS).toInstant();
     }
 
     private static Instant noonToday() {
-        return LocalDate.now(CAMPUS).atTime(12, 0).atZone(CAMPUS).toInstant();
+        return LocalDate.ofInstant(TEST_NOW, CAMPUS).atTime(12, 0).atZone(CAMPUS).toInstant();
     }
 
     private static java.util.function.Function<UriBuilder, URI> mapUri(

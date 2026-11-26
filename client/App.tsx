@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import * as Linking from 'expo-linking';
@@ -21,7 +21,7 @@ import { restoreSession, signInWithGoogle, signOut } from './src/auth';
 import { eventFromLink } from './src/events';
 import type { StoredSession } from './src/sessionStore';
 import { colors } from './src/theme';
-import { campusDayKey, clampCampusDay } from './src/campusTime';
+import { campusDayKey, clampCampusDay, reanchorCampusDay } from './src/campusTime';
 
 type Screen =
   | { status: 'loading' }
@@ -48,6 +48,9 @@ function QuackApp() {
   const [openEventId, setOpenEventId] = useState<string | null>(null);
   const [openToken, setOpenToken] = useState<string | null>(null);
   const [selectedDay, setSelectedDay] = useState(() => campusDayKey(new Date()));
+  const [campusAnchorDay, setCampusAnchorDay] = useState(() => campusDayKey(new Date()));
+  const selectedDayRef = useRef(selectedDay);
+  selectedDayRef.current = selectedDay;
   const [pendingLink, setPendingLink] = useState<{ id: string; token: string } | null>(null);
   const [fontsLoaded, fontError] = useFonts({
     BricolageGrotesque_600SemiBold,
@@ -58,7 +61,10 @@ function QuackApp() {
   useEffect(() => {
     const reanchor = () => {
       const now = new Date();
-      setSelectedDay((day) => clampCampusDay(day, now));
+      const next = reanchorCampusDay(selectedDayRef.current, now);
+      selectedDayRef.current = next.selectedDay;
+      setCampusAnchorDay(next.anchorDay);
+      setSelectedDay(next.selectedDay);
     };
     reanchor();
     const timer = setInterval(reanchor, 30_000);
@@ -186,6 +192,7 @@ function QuackApp() {
           onPinMoved={creating ? setPinned : undefined}
           refreshKey={mapRefresh}
           sessionId={screen.session.sessionId}
+          campusAnchorDay={campusAnchorDay}
           selectedDay={selectedDay}
           onSelectedDayChange={(day) => setSelectedDay(clampCampusDay(day, new Date()))}
           // The top bar hides while a sheet covers the map.

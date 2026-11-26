@@ -2,12 +2,15 @@ import { Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import ShowListIcon from '../assets/map/show-list.svg';
-import { campusDayLabel, campusDayKey, shiftCampusDay } from './campusTime';
+import { eventCountLabel, shiftCampusDay } from './campusTime';
+import { dateStepperState } from './dateStepper';
 import type { CurrentUser } from './sessionStore';
 import { colors } from './theme';
 
 export const TOP_BAR_HEIGHT = 56;
 export const TOP_BAR_GAP = 8;
+export const TOP_BAR_STEPPER_HEIGHT = 40;
+export const TOP_BAR_STEPPER_GAP = 6;
 
 export type Account = {
   user: CurrentUser;
@@ -25,6 +28,7 @@ type Props = {
   // The map couldn't load. The bar still shows, since it is the only way to sign out; the list
   // button is disabled because there is nothing to list.
   unavailable?: boolean;
+  campusAnchorDay: string;
   selectedDay: string;
   onSelectedDayChange: (day: string) => void;
 };
@@ -35,21 +39,18 @@ export default function TopBar({
   count,
   onOpenList,
   unavailable = false,
+  campusAnchorDay,
   selectedDay,
   onSelectedDayChange,
 }: Props) {
   const insets = useSafeAreaInsets();
   const { user, busy, message, onSignOut } = account;
-  const today = campusDayKey(new Date());
-  const yesterday = shiftCampusDay(today, -1);
-  const tomorrow = shiftCampusDay(today, 1);
-  const canGoBack = selectedDay !== yesterday;
-  const canGoForward = selectedDay !== tomorrow;
+  const { label: dayLabel, canGoBack, canGoForward } = dateStepperState(selectedDay, campusAnchorDay);
   const summary = unavailable
     ? 'Map unavailable'
     : count === null
       ? 'Finding events…'
-      : `${count} ${count === 1 ? 'event' : 'events'} today`;
+      : eventCountLabel(count, dayLabel);
 
   function confirmSignOut() {
     Alert.alert(user.displayName, user.email, [
@@ -89,7 +90,7 @@ export default function TopBar({
           <UserAvatar user={user} />
         </Pressable>
       </View>
-      <View accessibilityLabel={`Selected date: ${campusDayLabel(selectedDay, new Date())}`} style={styles.stepper}>
+      <View accessibilityLabel={`Selected date: ${dayLabel}`} style={styles.stepper}>
         <Pressable
           accessibilityLabel="Previous day"
           accessibilityRole="button"
@@ -100,7 +101,7 @@ export default function TopBar({
         >
           <Text style={styles.dayArrow}>‹</Text>
         </Pressable>
-        <Text accessibilityRole="header" style={styles.dayLabel}>{campusDayLabel(selectedDay, new Date())}</Text>
+        <Text accessibilityRole="header" style={styles.dayLabel}>{dayLabel}</Text>
         <Pressable
           accessibilityLabel="Next day"
           accessibilityRole="button"
@@ -169,6 +170,7 @@ const styles = StyleSheet.create({
     elevation: 3,
     flexDirection: 'row',
     gap: 8,
+    height: TOP_BAR_STEPPER_HEIGHT,
     justifyContent: 'center',
     paddingHorizontal: 6,
   },
