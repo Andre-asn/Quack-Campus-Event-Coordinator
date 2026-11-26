@@ -2,11 +2,15 @@ import { Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import ShowListIcon from '../assets/map/show-list.svg';
+import { eventCountLabel, shiftCampusDay } from './campusTime';
+import { dateStepperState } from './dateStepper';
 import type { CurrentUser } from './sessionStore';
 import { colors } from './theme';
 
 export const TOP_BAR_HEIGHT = 56;
 export const TOP_BAR_GAP = 8;
+export const TOP_BAR_STEPPER_HEIGHT = 40;
+export const TOP_BAR_STEPPER_GAP = 6;
 
 export type Account = {
   user: CurrentUser;
@@ -24,17 +28,29 @@ type Props = {
   // The map couldn't load. The bar still shows, since it is the only way to sign out; the list
   // button is disabled because there is nothing to list.
   unavailable?: boolean;
+  campusAnchorDay: string;
+  selectedDay: string;
+  onSelectedDayChange: (day: string) => void;
 };
 
 // Figma 03: logo, today's count for this view, the list, and the signed-in user.
-export default function TopBar({ account, count, onOpenList, unavailable = false }: Props) {
+export default function TopBar({
+  account,
+  count,
+  onOpenList,
+  unavailable = false,
+  campusAnchorDay,
+  selectedDay,
+  onSelectedDayChange,
+}: Props) {
   const insets = useSafeAreaInsets();
   const { user, busy, message, onSignOut } = account;
+  const { label: dayLabel, canGoBack, canGoForward } = dateStepperState(selectedDay, campusAnchorDay);
   const summary = unavailable
     ? 'Map unavailable'
     : count === null
       ? 'Finding events…'
-      : `${count} ${count === 1 ? 'event' : 'events'} today`;
+      : eventCountLabel(count, dayLabel);
 
   function confirmSignOut() {
     Alert.alert(user.displayName, user.email, [
@@ -72,6 +88,29 @@ export default function TopBar({ account, count, onOpenList, unavailable = false
           style={({ pressed }) => [pressed && styles.pressed, busy && styles.busy]}
         >
           <UserAvatar user={user} />
+        </Pressable>
+      </View>
+      <View accessibilityLabel={`Selected date: ${dayLabel}`} style={styles.stepper}>
+        <Pressable
+          accessibilityLabel="Previous day"
+          accessibilityRole="button"
+          accessibilityState={{ disabled: !canGoBack }}
+          disabled={!canGoBack}
+          onPress={() => onSelectedDayChange(shiftCampusDay(selectedDay, -1))}
+          style={({ pressed }) => [styles.dayButton, pressed && styles.pressed, !canGoBack && styles.busy]}
+        >
+          <Text style={styles.dayArrow}>‹</Text>
+        </Pressable>
+        <Text accessibilityRole="header" style={styles.dayLabel}>{dayLabel}</Text>
+        <Pressable
+          accessibilityLabel="Next day"
+          accessibilityRole="button"
+          accessibilityState={{ disabled: !canGoForward }}
+          disabled={!canGoForward}
+          onPress={() => onSelectedDayChange(shiftCampusDay(selectedDay, 1))}
+          style={({ pressed }) => [styles.dayButton, pressed && styles.pressed, !canGoForward && styles.busy]}
+        >
+          <Text style={styles.dayArrow}>›</Text>
         </Pressable>
       </View>
       {message ? (
@@ -123,6 +162,36 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.14,
     shadowRadius: 12,
+  },
+  stepper: {
+    alignItems: 'center',
+    backgroundColor: colors.white,
+    borderRadius: 24,
+    elevation: 3,
+    flexDirection: 'row',
+    gap: 8,
+    height: TOP_BAR_STEPPER_HEIGHT,
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+  },
+  dayButton: {
+    alignItems: 'center',
+    borderRadius: 20,
+    height: 40,
+    justifyContent: 'center',
+    width: 40,
+  },
+  dayArrow: {
+    color: colors.ink,
+    fontSize: 30,
+    lineHeight: 34,
+  },
+  dayLabel: {
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: '700',
+    minWidth: 88,
+    textAlign: 'center',
   },
   logo: {
     height: 32,
