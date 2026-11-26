@@ -13,6 +13,11 @@ Notifications.setNotificationHandler({
 
 export type LeadMinutes = 15 | 60;
 
+function leadMinutesOf(value: unknown): LeadMinutes | null {
+  const parsed = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : Number.NaN;
+  return parsed === 15 || parsed === 60 ? parsed : null;
+}
+
 function reminderId(eventId: string): string {
   return `quack-reminder-${eventId}`;
 }
@@ -114,7 +119,8 @@ export async function clearReminder(
 }
 
 // The server row is gone after a cancel or a leave, but the notification already sits on the device.
-// Launch and foreground compare it with the event's current start time and drop or move it.
+// Launch, returning to the foreground, and staying in the foreground compare the saved start and lead.
+// A closed app cannot run this, so that notification stays until the app is opened again.
 export async function syncReminders(sessionId: string): Promise<void> {
   let scheduled: Notifications.NotificationRequest[];
   try {
@@ -135,6 +141,7 @@ async function syncOne(sessionId: string, request: Notifications.NotificationReq
     : request.identifier.slice('quack-reminder-'.length);
   const token = typeof data.token === 'string' ? data.token : null;
   const savedStart = typeof data.startsAt === 'string' ? data.startsAt : null;
+  const savedLead = leadMinutesOf(data.leadMinutes);
   const event = await fetchEvent(sessionId, eventId, token);
   if (event === 'unavailable') {
     await cancelLocalReminder(eventId);
@@ -151,7 +158,7 @@ async function syncOne(sessionId: string, request: Notifications.NotificationReq
     await cancelLocalReminder(eventId);
     return;
   }
-  if (savedStart === event.startsAt) {
+  if (savedStart === event.startsAt && savedLead === lead) {
     return;
   }
   const fireAt = new Date(new Date(event.startsAt).getTime() - lead * 60_000);

@@ -154,18 +154,26 @@ function QuackApp() {
   const sessionId = screen.status === 'signed-in' ? screen.session.sessionId : null;
 
   // A cancel or a new start time only deletes the server row. Reconcile the device notification
-  // when the app opens and each time it comes back to the foreground.
+  // on launch, whenever the app returns, and while it stays open. A closed app cannot run this.
   useEffect(() => {
     if (!sessionId) {
       return;
     }
     void syncReminders(sessionId);
+    const timer = setInterval(() => {
+      if (AppState.currentState === 'active') {
+        void syncReminders(sessionId);
+      }
+    }, 60_000);
     const subscription = AppState.addEventListener('change', (next) => {
       if (next === 'active') {
         void syncReminders(sessionId);
       }
     });
-    return () => subscription.remove();
+    return () => {
+      clearInterval(timer);
+      subscription.remove();
+    };
   }, [sessionId]);
 
   useEffect(() => {

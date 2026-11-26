@@ -42,7 +42,7 @@ public class ReminderService {
     @Transactional
     public ReminderChoice save(String idText, String token, Integer leadMinutes) {
         User viewer = currentUser.require();
-        Event event = events.visibleEvent(idText, token);
+        Event event = events.visibleEventForUpdate(idText, token);
         if (leadMinutes == null || (leadMinutes != 15 && leadMinutes != 60)) {
             throw new EventStateException(
                     HttpStatus.UNPROCESSABLE_CONTENT,
@@ -71,7 +71,7 @@ public class ReminderService {
     @Transactional
     public void delete(String idText, String token) {
         User viewer = currentUser.require();
-        Event event = events.visibleEvent(idText, token);
+        Event event = events.visibleEventForUpdate(idText, token);
         reminders.deleteForUser(event.getId(), viewer.getId());
     }
 

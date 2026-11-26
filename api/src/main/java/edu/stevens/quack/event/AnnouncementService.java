@@ -68,7 +68,7 @@ public class AnnouncementService {
     @Transactional
     public AnnouncementController.Announcement post(String idText, String body) {
         User author = currentUser.require();
-        Event event = events.hostedEvent(idText, author.getId());
+        Event event = events.hostedEventForUpdate(idText, author.getId());
         if ("cancelled".equals(event.getStatus())) {
             throw new EventStateException(
                     HttpStatus.CONFLICT, "EVENT_CANCELLED", "Cancelled events can't be announced.");

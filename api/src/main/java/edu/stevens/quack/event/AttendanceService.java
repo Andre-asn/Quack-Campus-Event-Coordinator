@@ -47,7 +47,7 @@ public class AttendanceService {
     public void join(UUID eventId, String token) {
         User user = currentUser.require();
 
-        Event event = events.findById(eventId)
+        Event event = events.findByIdForUpdate(eventId)
                 .orElseThrow(AttendanceService::notFound);
 
         if ("link_only".equals(event.getVisibility())
@@ -82,7 +82,7 @@ public class AttendanceService {
     public void leave(UUID eventId, String token) {
         User user = currentUser.require();
 
-        Event event = events.findById(eventId)
+        Event event = events.findByIdForUpdate(eventId)
                 .orElseThrow(AttendanceService::notFound);
 
         if ("link_only".equals(event.getVisibility())

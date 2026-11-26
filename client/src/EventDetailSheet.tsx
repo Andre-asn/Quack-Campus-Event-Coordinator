@@ -31,7 +31,14 @@ import { categoryLabel } from './categories';
 import { loadAnnouncements, postAnnouncement, type Announcement } from './announcements';
 import { openCalendarEditor } from './deviceCalendar';
 import { loadEventDetail, setAttendance, type EventDetail } from './eventDetail';
-import { cancelLocalReminder, chooseReminder, clearReminder, loadReminder, type LeadMinutes } from './reminders';
+import {
+  cancelLocalReminder,
+  chooseReminder,
+  clearReminder,
+  loadReminder,
+  syncReminders,
+  type LeadMinutes,
+} from './reminders';
 import { eventShareLink } from './events';
 import HostAvatar from './HostAvatar';
 // Reanimated's withTiming needs the worklet easing, not core Animated's easeOut.
@@ -63,6 +70,10 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose }:
   const [pendingAction, setPendingAction] = useState<'join' | 'leave' | null>(null);
   const [needsRefresh, setNeedsRefresh] = useState(false);
   const attendanceRequest = useRef(0);
+  const pendingRef = useRef(false);
+  const stateRef = useRef<State>(state);
+  pendingRef.current = pending;
+  stateRef.current = state;
   const calendarOfferShown = useRef(false);
   const calendarActionStarted = useRef(false);
   const mounted = useRef(true);
@@ -240,11 +251,60 @@ export default function EventDetailSheet({ sessionId, eventId, token, onClose }:
     setActionError(outcome.message);
   }
 
-  // Keeps "Starts in 25 min" honest while the sheet stays open.
+  const refreshOpenEvent = useCallback(async () => {
+    if (pendingRef.current || stateRef.current.status !== 'loaded') {
+      return;
+    }
+    const seen = attendanceRequest.current;
+    const previous = stateRef.current.event;
+    let result: Awaited<ReturnType<typeof loadEventDetail>>;
+    try {
+      result = await loadEventDetail(sessionId, eventId, undefined, token);
+    } catch {
+      return;
+    }
+    if (!mounted.current || pendingRef.current || seen !== attendanceRequest.current) {
+      return;
+    }
+    if (!result.ok) {
+      return;
+    }
+    setState({ status: 'loaded', event: result.event });
+    if (result.event.status === 'cancelled' || !result.event.joined) {
+      await cancelLocalReminder(eventId);
+      return;
+    }
+    if (previous.startsAt !== result.event.startsAt || previous.status !== result.event.status) {
+      await syncReminders(sessionId);
+    }
+  }, [sessionId, eventId, token]);
+
+  // Keeps the relative time, the starting-soon marker, and a cancel or new start time current.
+  const openStart = state.status === 'loaded' ? state.event.startsAt : null;
+  const openStatus = state.status === 'loaded' ? state.event.status : null;
   useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 30_000);
+    const timer = setInterval(() => {
+      setNow(new Date());
+      void refreshOpenEvent();
+    }, 30_000);
     return () => clearInterval(timer);
-  }, []);
+  }, [refreshOpenEvent]);
+
+  useEffect(() => {
+    if (openStart === null || openStatus !== 'active') {
+      return;
+    }
+    const start = new Date(openStart).getTime();
+    const marks = [start - 3_600_000, start].filter((time) => time > Date.now());
+    if (marks.length === 0) {
+      return;
+    }
+    const delay = Math.min(...marks) - Date.now() + 250;
+    const timer = setTimeout(() => {
+      void refreshOpenEvent();
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [openStart, openStatus, refreshOpenEvent]);
 
   // Exit is quicker than entry.
   const close = useCallback(() => {
@@ -626,34 +686,58 @@ function Reminder({
 }) {
   const [lead, setLead] = useState<LeadMinutes | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const generation = useRef(0);
 
   useEffect(() => {
-    let cancelled = false;
+    const current = ++generation.current;
+    setBusy(false);
     loadReminder(sessionId, event.id, token).then((value) => {
-      if (!cancelled) {
+      if (current === generation.current) {
         setLead(value);
       }
     });
     return () => {
-      cancelled = true;
+      generation.current += 1;
     };
   }, [sessionId, event.id, token]);
 
   async function choose(next: LeadMinutes) {
+    if (busy) {
+      return;
+    }
+    const current = generation.current;
+    setBusy(true);
     setMessage(null);
     const outcome = await chooseReminder(sessionId, event.id, event.title, event.startsAt, next, token);
+    if (current !== generation.current) {
+      await cancelLocalReminder(event.id);
+      return;
+    }
+    setBusy(false);
     if (!outcome.ok) {
       setMessage(outcome.message);
-      const current = await loadReminder(sessionId, event.id, token);
-      setLead(current);
+      const loaded = await loadReminder(sessionId, event.id, token);
+      if (current === generation.current) {
+        setLead(loaded);
+      }
       return;
     }
     setLead(next);
   }
 
   async function turnOff() {
+    if (busy) {
+      return;
+    }
+    const current = generation.current;
+    setBusy(true);
     setMessage(null);
     const cleared = await clearReminder(sessionId, event.id, token);
+    if (current !== generation.current) {
+      return;
+    }
+    setBusy(false);
     if (!cleared) {
       setMessage('Couldn’t turn off the reminder. Try again.');
       return;
@@ -668,7 +752,8 @@ function Reminder({
         <Pressable
           accessibilityLabel="Remind me 1 hour before"
           accessibilityRole="button"
-          accessibilityState={{ selected: lead === 60 }}
+          accessibilityState={{ disabled: busy, selected: lead === 60 }}
+          disabled={busy}
           onPress={() => void choose(60)}
           style={({ pressed }) => [styles.share, lead === 60 && styles.reminderSelected, pressed && styles.pressed]}
         >
@@ -677,7 +762,8 @@ function Reminder({
         <Pressable
           accessibilityLabel="Remind me 15 minutes before"
           accessibilityRole="button"
-          accessibilityState={{ selected: lead === 15 }}
+          accessibilityState={{ disabled: busy, selected: lead === 15 }}
+          disabled={busy}
           onPress={() => void choose(15)}
           style={({ pressed }) => [styles.share, lead === 15 && styles.reminderSelected, pressed && styles.pressed]}
         >
@@ -687,6 +773,8 @@ function Reminder({
           <Pressable
             accessibilityLabel="Don't remind me"
             accessibilityRole="button"
+            accessibilityState={{ disabled: busy }}
+            disabled={busy}
             onPress={() => void turnOff()}
             style={({ pressed }) => [styles.share, pressed && styles.pressed]}
           >
