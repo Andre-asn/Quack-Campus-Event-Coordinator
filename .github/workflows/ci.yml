@@ -58,3 +58,6 @@ jobs:
 
       - name: Type-check client
         run: npm run typecheck
+
+      - name: Test client
+        run: npm test

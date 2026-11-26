@@ -1,6 +1,5 @@
 import { apiBaseUrl, sessionCookieName } from './config';
 import { campusDayKey, campusDayRange, campusDayRangeForKey } from './campusTime';
-import { isLatestMapLoad, mapEventQueryUrl } from './mapQuery';
 
 export type MapEvent = {
   id: string;
@@ -64,7 +63,7 @@ export async function loadMapEvents(
   const { from, to } = selectedDay === campusDayKey(new Date())
     ? campusDayRange(new Date())
     : campusDayRangeForKey(selectedDay);
-  const url = mapEventQueryUrl(apiBaseUrl, bbox, from, to);
+  const url = `${apiBaseUrl.replace(/\/$/, '')}/api/v1/events?bbox=${encodeURIComponent(bbox)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=100`;
   const headers: Record<string, string> = {
     Accept: 'application/json',
     Cookie: `${sessionCookieName}=${sessionId}`,
@@ -105,7 +104,7 @@ export async function loadMapEvents(
       events.push(...(nextPage.events ?? []));
       cursor = nextPage.nextCursor;
     }
-    if (isLatestMapLoad(generation, loadGeneration)) {
+    if (generation === loadGeneration) {
       cached = nextEtag && !page.nextCursor ? { sessionId, url, etag: nextEtag, events } : null;
     }
     return { events, unchanged: false };
