@@ -18,12 +18,19 @@ import EventFilters from './EventFilters';
 import FreeWindowControl, { type FreeWindow } from './FreeWindow';
 import { applyFilter, isFiltering, noFilter, type EventFilter } from './listFilters';
 import { groupBySpot, loadMapEvents, type MapEvent, type Spot } from './mapEvents';
+import { mapQueryFailed, mapQueryStarted } from './mapLoadingState';
 import PointerWhite from '../assets/signin/pin-pointer-white.svg';
 import PointerYellow from '../assets/signin/pin-pointer-yellow.svg';
 import Dots from '../assets/map/dots.svg';
 import HostAvatar from './HostAvatar';
 import { colors, fonts, sheetEaseOut } from './theme';
-import TopBar, { TOP_BAR_GAP, TOP_BAR_HEIGHT, type Account } from './TopBar';
+import TopBar, {
+  TOP_BAR_GAP,
+  TOP_BAR_HEIGHT,
+  TOP_BAR_STEPPER_GAP,
+  TOP_BAR_STEPPER_HEIGHT,
+  type Account,
+} from './TopBar';
 
 if (mapboxAccessToken) {
   void Mapbox.setAccessToken(mapboxAccessToken);
@@ -60,6 +67,8 @@ type Props = {
   onOpenEvent?: (eventId: string, token?: string) => void;
   // Supplied by the date stepper; omitted until the stepper is mounted by its parent.
   selectedDay?: string;
+  onSelectedDayChange?: (day: string) => void;
+  campusAnchorDay?: string;
   // The signed-in user, for the top bar. Absent hides the bar (while a sheet covers the map).
   account?: Account;
 };
@@ -101,6 +110,8 @@ export default function CampusMap({
   onOpenEvent,
   account,
   selectedDay,
+  onSelectedDayChange,
+  campusAnchorDay,
 }: Props) {
   const insets = useSafeAreaInsets();
   const mapRef = useRef<MapView>(null);
@@ -110,6 +121,7 @@ export default function CampusMap({
   const [lightPreset, setLightPreset] = useState(() => lightPresetFor(new Date().getHours()));
   const [currentDay, setCurrentDay] = useState(() => campusDayKey(new Date()));
   const day = selectedDay ?? currentDay;
+  const anchorDay = campusAnchorDay ?? currentDay;
   // Ticks with the lighting timer, so a pin turns to "Now" within a minute of its start.
   const [now, setNow] = useState(() => new Date());
   const past = isCampusDayBefore(day, now);
@@ -155,10 +167,13 @@ export default function CampusMap({
     const controller = new AbortController();
     let cancelled = false;
     // Keep the current pins until the new set arrives; clearing first made them flash on every pan.
-    if (loadedDay.current !== day) {
+    const dayChanged = loadedDay.current !== day;
+    const started = mapQueryStarted({ loaded, loadError }, dayChanged);
+    if (dayChanged) {
       setEvents([]);
     }
-    setLoadError(false);
+    setLoaded(started.loaded);
+    setLoadError(started.loadError);
     void loadMapEvents(sessionId, bbox, day, queryWindow, controller.signal)
       .then((result) => {
         if (cancelled) {
@@ -173,7 +188,9 @@ export default function CampusMap({
         if (cancelled || (error instanceof Error && error.name === 'AbortError')) {
           return;
         }
-        setLoadError(true);
+        const failed = mapQueryFailed();
+        setLoaded(failed.loaded);
+        setLoadError(failed.loadError);
       });
     return () => {
       cancelled = true;
@@ -232,7 +249,7 @@ export default function CampusMap({
             ? 'No Mapbox token is configured. Set EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN to a public pk. token in client/.env, then restart the bundler.'
             : 'The map could not load. Check your connection and reopen Quack!.'}
         />
-        {account ? <TopBar account={account} count={null} onOpenList={() => {}} unavailable /> : null}
+        {account ? <TopBar account={account} campusAnchorDay={anchorDay} count={null} onOpenList={() => {}} onSelectedDayChange={onSelectedDayChange ?? (() => {})} selectedDay={day} unavailable /> : null}
       </>
     );
   }
@@ -297,13 +314,15 @@ export default function CampusMap({
         // Sits just under the top bar.
         <View
           pointerEvents="none"
-          style={[styles.empty, { top: insets.top + TOP_BAR_GAP + TOP_BAR_HEIGHT + 12 }]}
+          style={[styles.empty, {
+            top: insets.top + TOP_BAR_GAP + TOP_BAR_HEIGHT + TOP_BAR_STEPPER_GAP + TOP_BAR_STEPPER_HEIGHT + 12,
+          }]}
         >
           <Text style={styles.errorText}>Couldn't load events. Pan the map to try again.</Text>
         </View>
       ) : null}
       {account ? (
-        <TopBar account={account} count={loaded ? events.length : null} onOpenList={() => setViewList(true)} />
+        <TopBar account={account} campusAnchorDay={anchorDay} count={loaded ? events.length : null} onOpenList={() => setViewList(true)} onSelectedDayChange={onSelectedDayChange ?? (() => {})} selectedDay={day} unavailable={loadError} />
       ) : null}
       <EventList
         closeLabel="Close show all"
